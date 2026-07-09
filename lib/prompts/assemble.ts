@@ -1,0 +1,71 @@
+import { GLOBAL_RULES } from "./global-rules";
+import type { ModuleTemplate, VoiceDoc, Deliverable, InputRow } from "@/lib/types";
+
+export interface AssembleArgs {
+  template: ModuleTemplate;
+  voiceDoc?: VoiceDoc | null;
+  priorDeliverables?: Pick<Deliverable, "tipo" | "contenido_md">[];
+  inputs?: InputRow[]; // raw insumos — used by D0
+  d0Content?: string | null; // D0 materia prima — used by D1+
+  instrucciones?: string | null; // operator's free-text extra instructions
+}
+
+// Only the fields we want to expose to the model (keeps ids/timestamps out of the prompt).
+function voiceForPrompt(v: VoiceDoc) {
+  return {
+    lexicon: v.lexicon,
+    citas_canon: v.citas_canon,
+    registro_si_no: v.registro_si_no,
+    lineas_rojas: v.lineas_rojas,
+  };
+}
+
+// Assembles the { system, user } pair for an Anthropic call (spec §7).
+export function assembleGeneration(a: AssembleArgs): { system: string; user: string } {
+  const system =
+    `${a.template.prompt_sistema}\n\n---\n${GLOBAL_RULES}` +
+    (a.template.estructura_output
+      ? `\n\n---\nESTRUCTURA ESPERADA DEL OUTPUT:\n${a.template.estructura_output}`
+      : "");
+
+  const parts: string[] = [];
+
+  if (a.voiceDoc) {
+    parts.push(
+      "# DOCUMENTO DE VOZ\n```json\n" +
+        JSON.stringify(voiceForPrompt(a.voiceDoc), null, 2) +
+        "\n```"
+    );
+  }
+
+  for (const d of a.priorDeliverables ?? []) {
+    if (d.contenido_md) parts.push(`# ENTREGABLE ${d.tipo} (aprobado)\n${d.contenido_md}`);
+  }
+
+  if (a.d0Content) parts.push(`# MATERIA PRIMA (D0)\n${a.d0Content}`);
+
+  if (a.inputs?.length) {
+    parts.push(
+      "# INSUMOS\n" +
+        a.inputs
+          .map(
+            (i) =>
+              `## [${i.tipo}] ${i.titulo}\n${
+                i.contenido_texto ?? `(archivo adjunto: ${i.file_url ?? "sin url"})`
+              }`
+          )
+          .join("\n\n")
+    );
+  }
+
+  if (a.instrucciones?.trim()) {
+    parts.push(`# INSTRUCCIONES ADICIONALES DEL OPERADOR\n${a.instrucciones.trim()}`);
+  }
+
+  return {
+    system,
+    user:
+      parts.join("\n\n") ||
+      "(No hay insumos cargados. Indica al operador que suba transcripciones y conclusiones antes de generar.)",
+  };
+}

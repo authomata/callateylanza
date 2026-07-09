@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f8f7f4;
+  --surface: #ffffff;
+  --foreground: #1a1a1a;
+  --muted: #6b6b6b;
+  --border: #e6e3dd;
+  --brand: #1f6b4c;      /* verde cordillera — placeholder de marca del programa */
+  --brand-fg: #ffffff;
+  --accent: #b5651d;     /* terracota */
+  --danger: #b3261e;
+  --ok: #1f6b4c;
+  --warn: #b5651d;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-brand: var(--brand);
+  --color-brand-fg: var(--brand-fg);
+  --color-accent: var(--accent);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #14140f;
+    --surface: #1c1c17;
+    --foreground: #ececE6;
+    --muted: #9a978f;
+    --border: #2c2c25;
+    --brand: #3f9b74;
+    --accent: #d0803a;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+/* Rendered markdown (deliverable preview + client web view) */
+.prose h1 { font-size: 1.6rem; font-weight: 700; margin: 1.2rem 0 0.6rem; }
+.prose h2 { font-size: 1.3rem; font-weight: 700; margin: 1.1rem 0 0.5rem; }
+.prose h3 { font-size: 1.1rem; font-weight: 600; margin: 1rem 0 0.4rem; }
+.prose p { margin: 0.6rem 0; line-height: 1.65; }
+.prose ul, .prose ol { margin: 0.5rem 0 0.5rem 1.4rem; list-style: revert; }
+.prose li { margin: 0.2rem 0; }
+.prose blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 0.9rem; margin: 0.8rem 0; color: var(--muted); font-style: italic;
+}
+.prose table { border-collapse: collapse; margin: 0.8rem 0; width: 100%; }
+.prose th, .prose td { border: 1px solid var(--border); padding: 0.4rem 0.6rem; text-align: left; }
+.prose code { background: color-mix(in srgb, var(--border) 60%, transparent); padding: 0.1rem 0.3rem; border-radius: 4px; font-family: var(--font-mono), monospace; font-size: 0.85em; }
+.prose hr { border: none; border-top: 1px solid var(--border); margin: 1.2rem 0; }
