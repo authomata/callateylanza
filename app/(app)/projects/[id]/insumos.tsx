@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui";
+import { SubmitButton } from "@/components/submit-button";
 import type { InputRow, VoiceDoc } from "@/lib/types";
 import { addInput, saveVoiceDoc } from "../actions";
 
@@ -96,7 +97,9 @@ function InsumosTab({ projectId, inputs }: { projectId: string; inputs: InputRow
             placeholder="Pega aquí la transcripción o conclusiones…"
             className="h-28 w-full resize-y rounded border border-border bg-background p-2 text-sm"
           />
-          <Button type="submit" variant="primary" className="w-full">Guardar insumo</Button>
+          <SubmitButton variant="primary" className="w-full" pendingText="Guardando insumo…">
+            Guardar insumo
+          </SubmitButton>
         </form>
       )}
     </div>
@@ -114,16 +117,25 @@ function VoiceTab({ projectId, voiceDoc }: { projectId: string; voiceDoc: VoiceD
   const [json, setJson] = useState(JSON.stringify(initial, null, 2));
   const [edit, setEdit] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   async function save() {
+    if (saving) return;
+    let parsed;
     try {
-      const parsed = JSON.parse(json);
-      setError(null);
+      parsed = JSON.parse(json);
+    } catch {
+      setError("JSON inválido");
+      return;
+    }
+    setError(null);
+    setSaving(true);
+    try {
       await saveVoiceDoc(projectId, parsed);
       setEdit(false);
       router.refresh();
-    } catch {
-      setError("JSON inválido");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -137,8 +149,10 @@ function VoiceTab({ projectId, voiceDoc }: { projectId: string; voiceDoc: VoiceD
         />
         {error && <p className="text-xs text-[var(--danger)]">{error}</p>}
         <div className="flex gap-2">
-          <Button variant="primary" onClick={save} className="flex-1">Guardar</Button>
-          <Button variant="ghost" onClick={() => setEdit(false)}>Cancelar</Button>
+          <Button variant="primary" onClick={save} disabled={saving} className="flex-1">
+            {saving ? "Guardando…" : "Guardar"}
+          </Button>
+          <Button variant="ghost" onClick={() => setEdit(false)} disabled={saving}>Cancelar</Button>
         </div>
       </div>
     );

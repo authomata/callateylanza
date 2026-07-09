@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Badge, Button, Card } from "@/components/ui";
+import { SubmitButton } from "@/components/submit-button";
 import type { ModuleTemplate } from "@/lib/types";
 import { updateTemplate, saveAsNewVersion, activateVersion } from "./actions";
 
@@ -66,12 +67,12 @@ export default function TemplateEditor({ tipo, versions }: { tipo: string; versi
           </Labeled>
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="primary" formAction={updateTemplate}>
+            <SubmitButton variant="primary" formAction={updateTemplate} pendingText="Guardando…">
               Guardar en v{t.version}
-            </Button>
-            <Button variant="secondary" formAction={saveAsNewVersion}>
+            </SubmitButton>
+            <SubmitButton variant="secondary" formAction={saveAsNewVersion} pendingText="Creando versión…">
               Guardar como nueva versión y activar
-            </Button>
+            </SubmitButton>
             {!t.activa && (
               <Button
                 type="button"

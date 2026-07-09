@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createProject } from "../actions";
 import { Button, Card } from "@/components/ui";
+import { SubmitButton } from "@/components/submit-button";
 
 export default function NewProjectPage() {
   return (
@@ -29,7 +30,7 @@ export default function NewProjectPage() {
             <Link href="/dashboard">
               <Button type="button" variant="ghost">Cancelar</Button>
             </Link>
-            <Button type="submit" variant="primary">Crear proyecto</Button>
+            <SubmitButton variant="primary" pendingText="Creando…">Crear proyecto</SubmitButton>
           </div>
         </form>
       </Card>

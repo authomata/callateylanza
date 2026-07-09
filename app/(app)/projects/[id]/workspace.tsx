@@ -46,6 +46,14 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
   const [instrucciones, setInstrucciones] = useState("");
   const [generating, setGenerating] = useState(false);
 
+  // per-action lock + transient confirmation (prevents double-click duplicates)
+  const [busy, setBusy] = useState<null | "listo" | "approve" | "save">(null);
+  const [flash, setFlash] = useState<string | null>(null);
+  function showFlash(msg: string) {
+    setFlash(msg);
+    setTimeout(() => setFlash(null), 2600);
+  }
+
   // reset the editor buffer when the selected deliverable changes (React-recommended
   // "adjust state during render" pattern instead of a setState-in-effect)
   const [prevSel, setPrevSel] = useState(selId);
@@ -76,10 +84,17 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
   }
 
   async function snapshot() {
-    await saveDeliverableVersion(selId, buffer, "humano");
-    patchItem(selId, { contenido_md: buffer });
-    setSaving("saved");
-    router.refresh();
+    if (busy) return;
+    setBusy("save");
+    try {
+      await saveDeliverableVersion(selId, buffer, "humano");
+      patchItem(selId, { contenido_md: buffer });
+      setSaving("saved");
+      showFlash("Versión guardada ✓");
+      router.refresh();
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function generate() {
@@ -118,27 +133,41 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
   }
 
   async function marcarListo() {
+    if (busy) return;
     if (voseo.length > 0) {
       alert("Hay formas de voseo sin corregir. Corrígelas antes de marcar listo para revisión.");
       return;
     }
-    await setDeliverableEstado(selId, "listo_para_revision");
-    patchItem(selId, { estado: "listo_para_revision" });
+    setBusy("listo");
+    try {
+      await setDeliverableEstado(selId, "listo_para_revision");
+      patchItem(selId, { estado: "listo_para_revision" });
+      showFlash("Marcado listo para revisión ✓");
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function approve() {
-    const res = await fetch(`/api/deliverables/${selId}/approve`, { method: "POST" });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      alert(data.error ?? "No se pudo aprobar");
-      return;
+    if (busy) return;
+    setBusy("approve");
+    try {
+      const res = await fetch(`/api/deliverables/${selId}/approve`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error ?? "No se pudo aprobar");
+        return;
+      }
+      patchItem(selId, { estado: "aprobado" });
+      showFlash(data.unlocked ? "Aprobado ✓ — D2–D8 desbloqueados" : "Aprobado ✓");
+      // D1 approval unlocks D2–D8; pull fresh gate state
+      router.refresh();
+      setItems((prev) =>
+        prev.map((d) => (data.unlocked && d.tipo !== "D0" && d.tipo !== "D1" ? { ...d, gate_bloqueado: false } : d))
+      );
+    } finally {
+      setBusy(null);
     }
-    patchItem(selId, { estado: "aprobado" });
-    // D1 approval unlocks D2–D8; pull fresh gate state
-    router.refresh();
-    setItems((prev) =>
-      prev.map((d) => (data.unlocked && d.tipo !== "D0" && d.tipo !== "D1" ? { ...d, gate_bloqueado: false } : d))
-    );
   }
 
   function applyAutocorrect() {
@@ -195,6 +224,12 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
               </div>
             </div>
 
+            {flash && (
+              <div className="rounded-md border border-brand bg-[color-mix(in_srgb,var(--brand)_12%,transparent)] px-3 py-2 text-sm font-medium text-brand">
+                {flash}
+              </div>
+            )}
+
             <GateOrControls
               selected={selected}
               generating={generating}
@@ -218,8 +253,8 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
               ))}
               <div className="ml-auto flex items-center gap-2 py-1">
                 <VersionHistory deliverableId={selId} onRestore={async (vid) => { await restoreVersion(selId, vid); router.refresh(); const d = items.find(i=>i.id===selId); if(d){setBuffer(d.contenido_md ?? "");} }} />
-                <Button variant="secondary" onClick={snapshot} disabled={generating}>
-                  Guardar versión
+                <Button variant="secondary" onClick={snapshot} disabled={generating || busy !== null}>
+                  {busy === "save" ? "Guardando…" : "Guardar versión"}
                 </Button>
               </div>
             </div>
@@ -249,13 +284,19 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
             {/* actions */}
             <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
               {selected.estado !== "aprobado" && selected.estado !== "publicado" && (
-                <Button variant="secondary" onClick={marcarListo} disabled={generating || !buffer.trim()}>
-                  Marcar listo para revisión
+                <Button
+                  variant="secondary"
+                  onClick={marcarListo}
+                  disabled={generating || busy !== null || !buffer.trim()}
+                >
+                  {busy === "listo" ? "Guardando…" : "Marcar listo para revisión"}
                 </Button>
               )}
               {userRol === "admin" && selected.estado === "listo_para_revision" && (
-                <Button variant="primary" onClick={approve}>
-                  Aprobar {selected.tipo === "D1" && "(desbloquea D2–D8)"}
+                <Button variant="primary" onClick={approve} disabled={busy !== null}>
+                  {busy === "approve"
+                    ? "Aprobando…"
+                    : `Aprobar${selected.tipo === "D1" ? " (desbloquea D2–D8)" : ""}`}
                 </Button>
               )}
               <a href={`/print/${selId}`} target="_blank" className="ml-auto text-sm text-brand hover:underline">
