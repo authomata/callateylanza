@@ -37,9 +37,9 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           <Link href="/dashboard" className="text-sm text-muted hover:underline">
             ← Proyectos
           </Link>
-          <h1 className="mt-1 text-xl font-bold">
+          <h1 className="mt-1 font-serif text-2xl">
             {client?.nombre}{" "}
-            <span className="text-sm font-normal text-muted">· {project.nombre}</span>
+            <span className="text-base text-muted">· {project.nombre}</span>
           </h1>
           <p className="text-xs text-muted">
             {[client?.ciudad, client?.rubro].filter(Boolean).join(" · ")} —{" "}

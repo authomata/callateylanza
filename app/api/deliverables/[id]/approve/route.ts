@@ -47,25 +47,26 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     .eq("id", id);
   if (upErr) return jsonError(400, upErr.message);
 
-  let unlocked = false;
+  // La disponibilidad de los siguientes entregables se recomputa sola (DAG).
   if (d.tipo === "D1") {
-    // GATE: D1 approval unlocks D2–D8.
-    await supabase
-      .from("deliverables")
-      .update({ gate_bloqueado: false })
-      .eq("project_id", d.project_id)
-      .neq("tipo", "D0")
-      .neq("tipo", "D1");
     await supabase.from("projects").update({ estado: "en_produccion" }).eq("id", d.project_id);
-    unlocked = true;
   }
 
   await supabase.from("activity_log").insert({
     project_id: d.project_id,
     user_id: user!.id,
     accion: "aprobado",
-    detalle: `${d.tipo}${unlocked ? " — desbloquea D2–D8" : ""}`,
+    detalle: d.tipo,
   });
 
-  return NextResponse.json({ ok: true, unlocked });
+  // Aviso al operador (campanita).
+  await supabase.from("notifications").insert({
+    target_rol: "operador",
+    project_id: d.project_id,
+    deliverable_id: d.id,
+    tipo: "aprobado",
+    texto: `Andrés aprobó ${d.tipo} — ${d.titulo}. Ya puedes seguir con lo que se habilite.`,
+  });
+
+  return NextResponse.json({ ok: true, tipo: d.tipo, unlocked: d.tipo === "D1" });
 }

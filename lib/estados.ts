@@ -2,14 +2,14 @@ import type { DeliverableEstado, ProjectEstado } from "@/lib/types";
 
 // Human labels + a semantic color token per state, shared across dashboard + project view.
 export const DELIVERABLE_ESTADO: Record<DeliverableEstado, { label: string; color: string }> = {
-  pendiente: { label: "Pendiente", color: "#9a978f" },
-  generando: { label: "Generando…", color: "#b5651d" },
-  borrador: { label: "Borrador", color: "#7a7a7a" },
-  en_edicion: { label: "En edición", color: "#3a72c4" },
-  listo_para_revision: { label: "Listo para revisión", color: "#b5651d" },
-  aprobado: { label: "Aprobado", color: "#1f6b4c" },
-  publicado: { label: "Publicado", color: "#0f5132" },
-  rechazado: { label: "Rechazado", color: "#b3261e" },
+  pendiente: { label: "Pendiente", color: "#a79c8d" },
+  generando: { label: "Generando…", color: "#bc5b34" },
+  borrador: { label: "Borrador", color: "#8c837a" },
+  en_edicion: { label: "En edición", color: "#5a5147" },
+  listo_para_revision: { label: "Listo para revisión", color: "#bc5b34" },
+  aprobado: { label: "Aprobado", color: "#2e5e4e" },
+  publicado: { label: "Publicado", color: "#2e5e4e" },
+  rechazado: { label: "Rechazado", color: "#a6321f" },
 };
 
 export const PROJECT_ESTADO: Record<ProjectEstado, string> = {

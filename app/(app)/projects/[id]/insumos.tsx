@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
-import type { InputRow, VoiceDoc } from "@/lib/types";
+import type { CitaCanon, InputRow, LexiconEntry, VoiceDoc } from "@/lib/types";
 import { addInput, saveVoiceDoc } from "../actions";
 
 const INPUT_LABEL: Record<string, string> = {
@@ -26,7 +26,7 @@ export default function InsumosPanel({
   const [pane, setPane] = useState<"insumos" | "voz">("insumos");
   return (
     <aside className="space-y-3">
-      <div className="flex items-center gap-1 rounded-md border border-border bg-surface p-1 text-sm">
+      <div className="flex items-center gap-1 rounded-lg border border-[var(--border-card)] bg-surface p-1 text-sm">
         <TabBtn active={pane === "insumos"} onClick={() => setPane("insumos")}>Insumos</TabBtn>
         <TabBtn active={pane === "voz"} onClick={() => setPane("voz")}>Documento de Voz</TabBtn>
       </div>
@@ -35,6 +35,9 @@ export default function InsumosPanel({
       ) : (
         <VoiceTab projectId={projectId} voiceDoc={voiceDoc} />
       )}
+      <p className="px-1 text-xs text-muted">
+        Los insumos alimentan la generación. El Documento de Voz se inyecta en todos los entregables.
+      </p>
     </aside>
   );
 }
@@ -43,7 +46,7 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
   return (
     <button
       onClick={onClick}
-      className={`flex-1 rounded px-2 py-1 ${active ? "bg-brand text-brand-fg" : "text-muted hover:text-foreground"}`}
+      className={`flex-1 rounded-md px-2 py-1 ${active ? "bg-brand text-brand-fg" : "text-muted hover:text-foreground"}`}
     >
       {children}
     </button>
@@ -56,21 +59,24 @@ function InsumosTab({ projectId, inputs }: { projectId: string; inputs: InputRow
 
   return (
     <div className="space-y-2">
-      <div className="max-h-[30vh] space-y-1 overflow-auto">
+      <div className="max-h-[30vh] space-y-1.5 overflow-auto">
         {inputs.length === 0 && <p className="px-1 text-xs text-muted">Sin insumos aún.</p>}
         {inputs.map((i) => (
           <button
             key={i.id}
             onClick={() => setViewing(viewing?.id === i.id ? null : i)}
-            className="block w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-left text-xs hover:bg-[color-mix(in_srgb,var(--border)_30%,transparent)]"
+            className="block w-full rounded-lg border border-[var(--border-card)] bg-surface px-2.5 py-2 text-left text-xs hover:bg-[color-mix(in_srgb,var(--border)_30%,transparent)]"
           >
-            <span className="font-medium">{INPUT_LABEL[i.tipo] ?? i.tipo}</span> — {i.titulo}
+            <span className="font-mono text-[10px] uppercase tracking-wider text-brand">
+              {INPUT_LABEL[i.tipo] ?? i.tipo}
+            </span>
+            <div className="text-secondary">{i.titulo}</div>
           </button>
         ))}
       </div>
 
       {viewing && (
-        <div className="max-h-[24vh] overflow-auto rounded-md border border-border bg-surface p-2 text-xs whitespace-pre-wrap">
+        <div className="max-h-[24vh] overflow-auto rounded-lg border border-[var(--border-card)] bg-surface p-2 text-xs whitespace-pre-wrap text-secondary">
           {viewing.contenido_texto ?? "(archivo adjunto)"}
         </div>
       )}
@@ -80,9 +86,9 @@ function InsumosTab({ projectId, inputs }: { projectId: string; inputs: InputRow
       </Button>
 
       {open && (
-        <form action={addInput} className="space-y-2 rounded-md border border-border bg-surface p-2">
+        <form action={addInput} className="space-y-2 rounded-lg border border-[var(--border-card)] bg-surface p-2">
           <input type="hidden" name="project_id" value={projectId} />
-          <select name="tipo" className="w-full rounded border border-border bg-background px-2 py-1 text-sm">
+          <select name="tipo" className="w-full rounded-md border border-[var(--border-card)] bg-background px-2 py-1 text-sm">
             <option value="transcripcion">Transcripción</option>
             <option value="conclusiones">Conclusiones</option>
             <option value="otro">Otro</option>
@@ -90,12 +96,12 @@ function InsumosTab({ projectId, inputs }: { projectId: string; inputs: InputRow
           <input
             name="titulo"
             placeholder="Título (ej. Sesión 1)"
-            className="w-full rounded border border-border bg-background px-2 py-1 text-sm"
+            className="w-full rounded-md border border-[var(--border-card)] bg-background px-2 py-1 text-sm"
           />
           <textarea
             name="contenido_texto"
             placeholder="Pega aquí la transcripción o conclusiones…"
-            className="h-28 w-full resize-y rounded border border-border bg-background p-2 text-sm"
+            className="h-28 w-full resize-y rounded-md border border-[var(--border-card)] bg-background p-2 text-sm"
           />
           <SubmitButton variant="primary" className="w-full" pendingText="Guardando insumo…">
             Guardar insumo
@@ -106,112 +112,132 @@ function InsumosTab({ projectId, inputs }: { projectId: string; inputs: InputRow
   );
 }
 
+// ── Documento de Voz — editable por tablas ──────────────────────────────────
 function VoiceTab({ projectId, voiceDoc }: { projectId: string; voiceDoc: VoiceDoc | null }) {
   const router = useRouter();
-  const initial = {
-    lexicon: voiceDoc?.lexicon ?? [],
-    citas_canon: voiceDoc?.citas_canon ?? [],
-    registro_si_no: voiceDoc?.registro_si_no ?? { si: [], no: [] },
-    lineas_rojas: voiceDoc?.lineas_rojas ?? [],
-  };
-  const [json, setJson] = useState(JSON.stringify(initial, null, 2));
-  const [edit, setEdit] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [lexicon, setLexicon] = useState<LexiconEntry[]>(voiceDoc?.lexicon ?? []);
+  const [citas, setCitas] = useState<CitaCanon[]>(voiceDoc?.citas_canon ?? []);
+  const [si, setSi] = useState<string[]>(voiceDoc?.registro_si_no?.si ?? []);
+  const [no, setNo] = useState<string[]>(voiceDoc?.registro_si_no?.no ?? []);
+  const [rojas, setRojas] = useState<string[]>(voiceDoc?.lineas_rojas ?? []);
   const [saving, setSaving] = useState(false);
+  const [flash, setFlash] = useState(false);
 
   async function save() {
     if (saving) return;
-    let parsed;
-    try {
-      parsed = JSON.parse(json);
-    } catch {
-      setError("JSON inválido");
-      return;
-    }
-    setError(null);
     setSaving(true);
     try {
-      await saveVoiceDoc(projectId, parsed);
-      setEdit(false);
+      await saveVoiceDoc(projectId, {
+        lexicon,
+        citas_canon: citas,
+        registro_si_no: { si, no },
+        lineas_rojas: rojas,
+      });
+      setFlash(true);
+      setTimeout(() => setFlash(false), 2000);
       router.refresh();
     } finally {
       setSaving(false);
     }
   }
 
-  if (edit) {
-    return (
-      <div className="space-y-2">
-        <textarea
-          value={json}
-          onChange={(e) => setJson(e.target.value)}
-          className="h-[46vh] w-full resize-y rounded-md border border-border bg-surface p-2 font-mono text-xs"
-        />
-        {error && <p className="text-xs text-[var(--danger)]">{error}</p>}
-        <div className="flex gap-2">
-          <Button variant="primary" onClick={save} disabled={saving} className="flex-1">
-            {saving ? "Guardando…" : "Guardar"}
-          </Button>
-          <Button variant="ghost" onClick={() => setEdit(false)} disabled={saving}>Cancelar</Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-3 text-xs">
-      <Section title={`Lexicón (${initial.lexicon.length})`}>
-        {initial.lexicon.length === 0 ? (
-          <Empty />
-        ) : (
-          initial.lexicon.map((l, i) => (
-            <div key={i} className="rounded border border-border p-1.5">
-              <span className="font-medium">{l.expresion}</span>
-              <span className="text-muted"> — {l.significado}</span>
-            </div>
-          ))
-        )}
+      <Section title={`Lexicón (${lexicon.length})`}>
+        {lexicon.map((l, i) => (
+          <div key={i} className="space-y-1 rounded-md border border-[var(--border-card)] bg-background p-1.5">
+            <Field value={l.expresion} placeholder="expresión textual" onChange={(v) => setLexicon(upd(lexicon, i, { expresion: v }))} />
+            <Field value={l.significado} placeholder="qué significa / de dónde viene" onChange={(v) => setLexicon(upd(lexicon, i, { significado: v }))} />
+            <RemoveBtn onClick={() => setLexicon(rm(lexicon, i))} />
+          </div>
+        ))}
+        <AddBtn onClick={() => setLexicon([...lexicon, { expresion: "", significado: "", de_donde_viene: "", como_usarla: "" }])} />
       </Section>
-      <Section title={`Citas canon (${initial.citas_canon.length})`}>
-        {initial.citas_canon.length === 0 ? (
-          <Empty />
-        ) : (
-          initial.citas_canon.map((c, i) => (
-            <blockquote key={i} className="border-l-2 border-[var(--accent)] pl-2 italic text-muted">
-              “{c.cita}”
-            </blockquote>
-          ))
-        )}
+
+      <Section title={`Citas canon (${citas.length})`}>
+        {citas.map((c, i) => (
+          <div key={i} className="space-y-1 rounded-md border border-[var(--border-card)] bg-background p-1.5">
+            <Field value={c.cita} placeholder="frase textual del cliente" onChange={(v) => setCitas(upd(citas, i, { cita: v }))} />
+            <Field value={c.contexto} placeholder="contexto" onChange={(v) => setCitas(upd(citas, i, { contexto: v }))} />
+            <RemoveBtn onClick={() => setCitas(rm(citas, i))} />
+          </div>
+        ))}
+        <AddBtn onClick={() => setCitas([...citas, { cita: "", contexto: "" }])} />
       </Section>
+
       <Section title="Registro">
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <div className="font-medium text-[var(--ok,#1f6b4c)]">SÍ suena a él</div>
-            {initial.registro_si_no.si?.map((s, i) => <div key={i} className="text-muted">· {s}</div>)}
-          </div>
-          <div>
-            <div className="font-medium text-[var(--danger)]">NUNCA</div>
-            {initial.registro_si_no.no?.map((s, i) => <div key={i} className="text-muted">· {s}</div>)}
-          </div>
-        </div>
+        <div className="mb-1 font-medium text-[var(--ok)]">SÍ suena a él</div>
+        <StringList items={si} setItems={setSi} placeholder="…" />
+        <div className="mb-1 mt-2 font-medium text-[var(--danger)]">NUNCA suena a él</div>
+        <StringList items={no} setItems={setNo} placeholder="…" />
       </Section>
-      <Section title="Líneas rojas">
-        {initial.lineas_rojas.length === 0 ? <Empty /> : initial.lineas_rojas.map((l, i) => <div key={i} className="text-muted">· {l}</div>)}
+
+      <Section title={`Líneas rojas (${rojas.length})`}>
+        <StringList items={rojas} setItems={setRojas} placeholder="ej. de prácticas, nunca de personas" />
       </Section>
-      <Button variant="secondary" className="w-full" onClick={() => setEdit(true)}>Editar Documento de Voz</Button>
+
+      <Button variant="primary" className="w-full" onClick={save} disabled={saving}>
+        {saving ? "Guardando…" : flash ? "Guardado ✓" : "Guardar Documento de Voz"}
+      </Button>
     </div>
+  );
+}
+
+// helpers de arrays
+function upd<T>(arr: T[], i: number, patch: Partial<T>): T[] {
+  return arr.map((x, j) => (j === i ? { ...x, ...patch } : x));
+}
+function rm<T>(arr: T[], i: number): T[] {
+  return arr.filter((_, j) => j !== i);
+}
+
+function StringList({ items, setItems, placeholder }: { items: string[]; setItems: (v: string[]) => void; placeholder: string }) {
+  return (
+    <div className="space-y-1">
+      {items.map((s, i) => (
+        <div key={i} className="flex items-center gap-1">
+          <Field value={s} placeholder={placeholder} onChange={(v) => setItems(items.map((x, j) => (j === i ? v : x)))} />
+          <button onClick={() => setItems(items.filter((_, j) => j !== i))} className="shrink-0 px-1 text-muted hover:text-[var(--danger)]">
+            ✕
+          </button>
+        </div>
+      ))}
+      <AddBtn onClick={() => setItems([...items, ""])} />
+    </div>
+  );
+}
+
+function Field({ value, placeholder, onChange }: { value: string; placeholder: string; onChange: (v: string) => void }) {
+  return (
+    <input
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full rounded border border-[var(--border-card)] bg-surface px-1.5 py-1 text-xs outline-none focus:border-brand"
+    />
+  );
+}
+
+function AddBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="text-xs text-brand hover:underline">
+      + agregar
+    </button>
+  );
+}
+function RemoveBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="text-[11px] text-muted hover:text-[var(--danger)]">
+      Eliminar
+    </button>
   );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-md border border-border bg-surface p-2">
-      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">{title}</div>
-      <div className="space-y-1">{children}</div>
+    <div className="rounded-lg border border-[var(--border-card)] bg-surface p-2">
+      <div className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-muted">{title}</div>
+      <div className="space-y-1.5">{children}</div>
     </div>
   );
-}
-
-function Empty() {
-  return <p className="text-muted">Vacío a resolver.</p>;
 }

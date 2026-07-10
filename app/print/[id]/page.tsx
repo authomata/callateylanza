@@ -52,8 +52,8 @@ export default async function PrintPage({ params }: { params: Promise<{ id: stri
       </div>
 
       {/* Portada */}
-      <div className="mb-10 border-b-2 border-[#b5651d] pb-8">
-        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[#b5651d]">
+      <div className="mb-10 border-b-2 border-[#bc5b34] pb-8">
+        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[#bc5b34]">
           Cállate y Lanza · Entregable {DELIVERABLE_NUM[d.tipo] ?? d.tipo}
         </div>
         <h1 className="mt-3 text-3xl font-bold">{d.titulo}</h1>
@@ -69,7 +69,7 @@ export default async function PrintPage({ params }: { params: Promise<{ id: stri
       </div>
 
       {/* Contenido */}
-      <article className="prose">
+      <article className="doc">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>
           {d.contenido_md || "*Este entregable aún no tiene contenido.*"}
         </ReactMarkdown>

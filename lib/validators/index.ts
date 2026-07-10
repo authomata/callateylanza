@@ -1,10 +1,11 @@
 import { findVoseo, type VoseoFinding } from "./voseo";
+import { checkAnchors, type AnchorReport } from "./anchors";
 import type { DeliverableTipo } from "@/lib/types";
 
 export interface ValidationReport {
   voseo: VoseoFinding[];
   length?: { chars: number; max: number; ok: boolean };
-  anchors?: { ok: boolean; message: string }; // D2/D8 — stubbed for later phases
+  anchors?: AnchorReport; // D2/D8
 }
 
 // Runs the validators applicable to a given module type (spec §7 post-generation).
@@ -16,8 +17,10 @@ export function runValidators(tipo: DeliverableTipo, text: string): ValidationRe
     report.length = { chars, max: 8000, ok: chars <= 8000 };
   }
 
-  // TODO(Fase 2/3): anchor validator for D2/D8 — every pieza must have a non-empty Ancla
-  // referencing a D0 story.
+  if (tipo === "D2" || tipo === "D8") {
+    report.anchors = checkAnchors(text);
+  }
+
   return report;
 }
 
@@ -25,8 +28,11 @@ export function runValidators(tipo: DeliverableTipo, text: string): ValidationRe
 export function isCleanForApproval(report: ValidationReport): boolean {
   if (report.voseo.length > 0) return false;
   if (report.length && !report.length.ok) return false;
+  if (report.anchors && !report.anchors.ok) return false;
   return true;
 }
 
 export { findVoseo, autoCorrectVoseo, hasVoseo } from "./voseo";
+export { checkAnchors } from "./anchors";
 export type { VoseoFinding } from "./voseo";
+export type { AnchorReport } from "./anchors";

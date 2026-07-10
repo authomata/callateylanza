@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentUser, isStaff } from "@/lib/auth/roles";
+import { getCurrentUser, isStaff, isAdmin } from "@/lib/auth/roles";
 import type { DeliverableTipo, GeneradoPor } from "@/lib/types";
 
 const DELIVERABLE_NAMES: Record<DeliverableTipo, string> = {
@@ -165,17 +165,118 @@ export async function updateDeliverableContent(deliverableId: string, contenido:
   if (error) throw new Error(error.message);
 }
 
+// Admin override del gate de dependencias.
+export async function overrideUnlock(deliverableId: string) {
+  const user = await getCurrentUser();
+  if (!isAdmin(user)) throw new Error("Solo un admin puede desbloquear");
+  const supabase = await createClient();
+  const { data: d } = await supabase
+    .from("deliverables")
+    .select("project_id, tipo")
+    .eq("id", deliverableId)
+    .single();
+  const { error } = await supabase
+    .from("deliverables")
+    .update({ desbloqueo_manual: true })
+    .eq("id", deliverableId);
+  if (error) throw new Error(error.message);
+  if (d) {
+    await log(d.project_id, user!.id, "desbloqueo_manual", d.tipo);
+    revalidatePath(`/projects/${d.project_id}`);
+  }
+}
+
 export async function setDeliverableEstado(deliverableId: string, estado: string) {
   const user = await getCurrentUser();
   if (!isStaff(user)) throw new Error("No autorizado");
   const supabase = await createClient();
-  const { data: d } = await supabase.from("deliverables").select("project_id").eq("id", deliverableId).single();
+  const { data: d } = await supabase
+    .from("deliverables")
+    .select("project_id, tipo, titulo")
+    .eq("id", deliverableId)
+    .single();
   const { error } = await supabase.from("deliverables").update({ estado }).eq("id", deliverableId);
   if (error) throw new Error(error.message);
   if (d) {
-    await log(d.project_id, user!.id, "estado_cambiado", `${deliverableId} → ${estado}`);
+    await log(d.project_id, user!.id, "estado_cambiado", `${d.tipo} → ${estado}`);
+    // Al marcar listo, avisar al admin (campanita).
+    if (estado === "listo_para_revision") {
+      await supabase.from("notifications").insert({
+        target_rol: "admin",
+        project_id: d.project_id,
+        deliverable_id: deliverableId,
+        tipo: "listo_para_revision",
+        texto: `${user!.nombre} marcó ${d.tipo} — ${d.titulo} listo para revisión.`,
+      });
+    }
     revalidatePath(`/projects/${d.project_id}`);
   }
+}
+
+// Rechazo con feedback (admin): vuelve a edición + comentario + aviso al operador.
+export async function rechazar(deliverableId: string, comentario: string) {
+  const user = await getCurrentUser();
+  if (!isAdmin(user)) throw new Error("Solo un admin puede rechazar");
+  if (!comentario.trim()) throw new Error("El rechazo requiere un comentario");
+  const supabase = await createClient();
+  const { data: d } = await supabase
+    .from("deliverables")
+    .select("project_id, tipo, titulo, estado")
+    .eq("id", deliverableId)
+    .single();
+  if (!d) throw new Error("Entregable no encontrado");
+
+  await supabase.from("deliverables").update({ estado: "rechazado" }).eq("id", deliverableId);
+  await supabase.from("comments").insert({
+    deliverable_id: deliverableId,
+    user_id: user!.id,
+    texto: comentario.trim(),
+  });
+  await supabase.from("notifications").insert({
+    target_rol: "operador",
+    project_id: d.project_id,
+    deliverable_id: deliverableId,
+    tipo: "rechazado",
+    texto: `Andrés devolvió ${d.tipo} — ${d.titulo} con cambios. Revisa el comentario.`,
+  });
+  await log(d.project_id, user!.id, "rechazado", d.tipo);
+  revalidatePath(`/projects/${d.project_id}`);
+}
+
+export async function addComment(deliverableId: string, texto: string) {
+  const user = await getCurrentUser();
+  if (!isStaff(user)) throw new Error("No autorizado");
+  if (!texto.trim()) return;
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("comments")
+    .insert({ deliverable_id: deliverableId, user_id: user!.id, texto: texto.trim() });
+  if (error) throw new Error(error.message);
+}
+
+export async function getComments(deliverableId: string) {
+  const user = await getCurrentUser();
+  if (!isStaff(user)) return [];
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("comments")
+    .select("id, texto, created_at, users(nombre)")
+    .eq("deliverable_id", deliverableId)
+    .order("created_at", { ascending: false });
+  return data ?? [];
+}
+
+// Notificaciones (campanita).
+export async function markNotificationsRead() {
+  const user = await getCurrentUser();
+  if (!isStaff(user)) return;
+  const supabase = await createClient();
+  await supabase
+    .from("notifications")
+    .update({ leido: true })
+    .eq("leido", false)
+    .or(`target_rol.eq.${user!.rol},user_id.eq.${user!.id}`);
+  revalidatePath("/", "layout");
 }
 
 export async function getVersions(deliverableId: string) {

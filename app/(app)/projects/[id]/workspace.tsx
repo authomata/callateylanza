@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { Badge, Button } from "@/components/ui";
+import { DocView } from "@/components/doc-view";
+import { PipelineRail } from "@/components/pipeline-rail";
 import { DELIVERABLE_ESTADO } from "@/lib/estados";
-import { findVoseo, autoCorrectVoseo } from "@/lib/validators/voseo";
+import { autoCorrectVoseo } from "@/lib/validators/voseo";
+import { runValidators } from "@/lib/validators";
+import { computeAvailability, nextRecommended } from "@/lib/pipeline";
 import type { Deliverable, InputRow, ModuleTemplate, UserRol, VoiceDoc } from "@/lib/types";
 import {
   updateDeliverableContent,
@@ -14,6 +16,10 @@ import {
   setDeliverableEstado,
   getVersions,
   restoreVersion,
+  overrideUnlock,
+  rechazar,
+  addComment,
+  getComments,
 } from "../actions";
 import InsumosPanel from "./insumos";
 
@@ -31,46 +37,55 @@ interface Props {
 export default function ProjectWorkspace({ projectId, userRol, deliverables, inputs, voiceDoc, templates }: Props) {
   const router = useRouter();
   const [items, setItems] = useState<Deliverable[]>(deliverables);
-  const [selId, setSelId] = useState<string>(
-    () => deliverables.find((d) => d.tipo === "D1")?.id ?? deliverables[0]?.id ?? ""
-  );
+  const [selId, setSelId] = useState<string>(() => {
+    const next = nextRecommended(deliverables);
+    return (
+      (next && deliverables.find((d) => d.tipo === next)?.id) ??
+      deliverables.find((d) => d.tipo === "D1")?.id ??
+      deliverables[0]?.id ??
+      ""
+    );
+  });
   const selected = items.find((d) => d.id === selId) ?? null;
+
+  const availability = useMemo(() => computeAvailability(items), [items]);
+  const nextTipo = useMemo(() => nextRecommended(items), [items]);
+  const selAvail = selected ? availability[selected.tipo] : undefined;
 
   // editor buffer
   const [buffer, setBuffer] = useState<string>(selected?.contenido_md ?? "");
-  const [tab, setTab] = useState<"editar" | "vista">("editar");
+  const [tab, setTab] = useState<"editar" | "vista">("vista");
   const [saving, setSaving] = useState<"idle" | "saving" | "saved">("idle");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // generation / instructions
   const [instrucciones, setInstrucciones] = useState("");
   const [generating, setGenerating] = useState(false);
-
-  // per-action lock + transient confirmation (prevents double-click duplicates)
-  const [busy, setBusy] = useState<null | "listo" | "approve" | "save">(null);
+  const [busy, setBusy] = useState<null | "listo" | "approve" | "save" | "unlock" | "reject">(null);
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectText, setRejectText] = useState("");
   const [flash, setFlash] = useState<string | null>(null);
   function showFlash(msg: string) {
     setFlash(msg);
     setTimeout(() => setFlash(null), 2600);
   }
 
-  // reset the editor buffer when the selected deliverable changes (React-recommended
-  // "adjust state during render" pattern instead of a setState-in-effect)
+  // reset buffer when selection changes (adjust-state-during-render)
   const [prevSel, setPrevSel] = useState(selId);
   if (selId !== prevSel) {
     setPrevSel(selId);
     setBuffer(selected?.contenido_md ?? "");
-    setTab("editar");
+    setTab(selected?.contenido_md ? "vista" : "editar");
   }
 
   const template = templates.find((t) => t.tipo === selected?.tipo);
-  const voseo = useMemo(() => findVoseo(buffer), [buffer]);
+  const report = useMemo(() => runValidators(selected?.tipo ?? "D1", buffer), [buffer, selected?.tipo]);
+  const voseo = report.voseo;
+  const cleanForListo = voseo.length === 0 && (!report.length || report.length.ok) && (!report.anchors || report.anchors.ok);
 
   const patchItem = useCallback((id: string, patch: Partial<Deliverable>) => {
     setItems((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
   }, []);
 
-  // debounced autosave (content only, no version snapshot)
   function onEdit(v: string) {
     setBuffer(v);
     setSaving("saving");
@@ -126,6 +141,7 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
       }
       patchItem(selId, { contenido_md: acc, estado: "borrador" });
       setInstrucciones("");
+      setTab("vista");
       router.refresh();
     } finally {
       setGenerating(false);
@@ -134,8 +150,8 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
 
   async function marcarListo() {
     if (busy) return;
-    if (voseo.length > 0) {
-      alert("Hay formas de voseo sin corregir. Corrígelas antes de marcar listo para revisión.");
+    if (!cleanForListo) {
+      alert("Corrige las validaciones (voseo / anclas / largo) antes de marcar listo para revisión.");
       return;
     }
     setBusy("listo");
@@ -158,52 +174,55 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
         alert(data.error ?? "No se pudo aprobar");
         return;
       }
+      // marcar aprobado localmente → la disponibilidad de los dependientes se recomputa sola
       patchItem(selId, { estado: "aprobado" });
-      showFlash(data.unlocked ? "Aprobado ✓ — D2–D8 desbloqueados" : "Aprobado ✓");
-      // D1 approval unlocks D2–D8; pull fresh gate state
+      showFlash(data.unlocked ? "Aprobado ✓ — se habilita la etapa siguiente" : "Aprobado ✓");
       router.refresh();
-      setItems((prev) =>
-        prev.map((d) => (data.unlocked && d.tipo !== "D0" && d.tipo !== "D1" ? { ...d, gate_bloqueado: false } : d))
-      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function doReject() {
+    if (!rejectText.trim()) {
+      alert("Escribe el motivo del rechazo para que el operador sepa qué ajustar.");
+      return;
+    }
+    setBusy("reject");
+    try {
+      await rechazar(selId, rejectText);
+      patchItem(selId, { estado: "rechazado" });
+      setRejecting(false);
+      setRejectText("");
+      showFlash("Devuelto con comentarios ✓");
+      router.refresh();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function unlock() {
+    if (busy) return;
+    setBusy("unlock");
+    try {
+      await overrideUnlock(selId);
+      patchItem(selId, { desbloqueo_manual: true });
+      showFlash("Desbloqueado manualmente ✓");
     } finally {
       setBusy(null);
     }
   }
 
   function applyAutocorrect() {
-    const fixed = autoCorrectVoseo(buffer);
-    onEdit(fixed);
+    onEdit(autoCorrectVoseo(buffer));
   }
 
+  const est = selected ? DELIVERABLE_ESTADO[selected.estado] : null;
+
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_1fr_320px]">
-      {/* LEFT — checklist */}
-      <aside className="space-y-1">
-        <div className="px-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted">Entregables</div>
-        {items.map((d) => {
-          const est = DELIVERABLE_ESTADO[d.estado];
-          const locked = d.gate_bloqueado && d.estado === "pendiente";
-          return (
-            <button
-              key={d.id}
-              onClick={() => setSelId(d.id)}
-              className={`flex w-full items-center justify-between rounded-md border px-2.5 py-2 text-left text-sm transition ${
-                d.id === selId ? "border-brand bg-[color-mix(in_srgb,var(--brand)_8%,transparent)]" : "border-border bg-surface hover:bg-[color-mix(in_srgb,var(--border)_30%,transparent)]"
-              }`}
-            >
-              <span className="flex items-center gap-2">
-                <span className="font-mono text-xs text-muted">{d.tipo}</span>
-                <span className="truncate">{d.titulo}</span>
-              </span>
-              {locked ? (
-                <span title="Bloqueado hasta aprobar D1" className="text-muted">🔒</span>
-              ) : (
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: est.color }} />
-              )}
-            </button>
-          );
-        })}
-      </aside>
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[300px_1fr_320px]">
+      {/* LEFT — camino */}
+      <PipelineRail items={items} availability={availability} selId={selId} onSelect={setSelId} nextTipo={nextTipo} />
 
       {/* CENTER — editor */}
       <section className="min-w-0 space-y-3">
@@ -211,49 +230,62 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
           <p className="text-muted">Selecciona un entregable.</p>
         ) : (
           <>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-sm text-muted">{selected.tipo}</span>
-                <h2 className="text-lg font-semibold">{selected.titulo}</h2>
-                <Badge label={DELIVERABLE_ESTADO[selected.estado].label} color={DELIVERABLE_ESTADO[selected.estado].color} />
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
+              <div className="flex items-center gap-2.5">
+                <span className="font-mono text-xs text-brand">{selected.tipo}</span>
+                <h2 className="font-serif text-2xl">{selected.titulo}</h2>
+                {est && <Badge label={est.label} color={est.color} />}
               </div>
               <div className="flex items-center gap-2 text-xs text-muted">
                 {saving === "saving" && <span>Guardando…</span>}
                 {saving === "saved" && <span>Guardado ✓</span>}
-                <span>v{selected.version_actual}</span>
+                <span className="font-mono">v{selected.version_actual}</span>
               </div>
             </div>
 
             {flash && (
-              <div className="rounded-md border border-brand bg-[color-mix(in_srgb,var(--brand)_12%,transparent)] px-3 py-2 text-sm font-medium text-brand">
+              <div className="rounded-lg border border-[var(--ok)] bg-[var(--ok-bg)] px-3 py-2 text-sm font-medium text-[var(--ok)]">
                 {flash}
               </div>
             )}
 
             <GateOrControls
               selected={selected}
+              disponible={selAvail?.disponible ?? true}
+              faltan={selAvail?.faltan ?? []}
+              userRol={userRol}
               generating={generating}
+              busy={busy}
               instrucciones={instrucciones}
               setInstrucciones={setInstrucciones}
               onGenerate={generate}
+              onUnlock={unlock}
             />
 
-            {/* editor tabs */}
+            {/* tabs */}
             <div className="flex items-center gap-1 border-b border-border">
-              {(["editar", "vista"] as const).map((t) => (
+              {(["vista", "editar"] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
                   className={`px-3 py-1.5 text-sm capitalize ${
-                    tab === t ? "border-b-2 border-brand font-medium" : "text-muted"
+                    tab === t ? "border-b-2 border-brand font-medium text-foreground" : "text-muted"
                   }`}
                 >
                   {t}
                 </button>
               ))}
               <div className="ml-auto flex items-center gap-2 py-1">
-                <VersionHistory deliverableId={selId} onRestore={async (vid) => { await restoreVersion(selId, vid); router.refresh(); const d = items.find(i=>i.id===selId); if(d){setBuffer(d.contenido_md ?? "");} }} />
-                <Button variant="secondary" onClick={snapshot} disabled={generating || busy !== null}>
+                <VersionHistory
+                  deliverableId={selId}
+                  onRestore={async (vid) => {
+                    await restoreVersion(selId, vid);
+                    router.refresh();
+                    const d = items.find((i) => i.id === selId);
+                    if (d) setBuffer(d.contenido_md ?? "");
+                  }}
+                />
+                <Button variant="ink" onClick={snapshot} disabled={generating || busy !== null}>
                   {busy === "save" ? "Guardando…" : "Guardar versión"}
                 </Button>
               </div>
@@ -265,23 +297,27 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
                 onChange={(e) => onEdit(e.target.value)}
                 disabled={generating}
                 placeholder={generating ? "Generando…" : "El contenido generado aparecerá aquí. También puedes escribir directamente."}
-                className="h-[52vh] w-full resize-y rounded-md border border-border bg-surface p-4 font-mono text-sm leading-relaxed outline-none focus:border-brand"
+                className="h-[54vh] w-full resize-y rounded-xl border border-[var(--border-card)] bg-surface p-4 font-mono text-[13px] leading-relaxed outline-none focus:border-brand"
               />
             ) : (
-              <div className="prose h-[52vh] overflow-auto rounded-md border border-border bg-surface p-6">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{buffer || "*Sin contenido.*"}</ReactMarkdown>
+              <div className="h-[54vh] overflow-auto rounded-xl border border-[var(--border-card)] bg-surface px-8 py-7 shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
+                <DocView tipo={selected.tipo}>{buffer}</DocView>
               </div>
             )}
 
-            {/* voseo validator */}
+            {/* validadores */}
             <VoseoPanel findings={voseo} onFixAll={applyAutocorrect} />
-
-            {/* checklist de calidad */}
-            {template && template.checklist_calidad?.length > 0 && (
-              <Checklist items={template.checklist_calidad} />
+            {report.anchors && <ValidatorLine ok={report.anchors.ok} text={report.anchors.message} />}
+            {report.length && (
+              <ValidatorLine
+                ok={report.length.ok}
+                text={`${report.length.chars.toLocaleString("es-CL")} / ${report.length.max.toLocaleString("es-CL")} caracteres`}
+              />
             )}
 
-            {/* actions */}
+            {template && template.checklist_calidad?.length > 0 && <Checklist items={template.checklist_calidad} />}
+
+            {/* acciones */}
             <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
               {selected.estado !== "aprobado" && selected.estado !== "publicado" && (
                 <Button
@@ -293,16 +329,38 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
                 </Button>
               )}
               {userRol === "admin" && selected.estado === "listo_para_revision" && (
-                <Button variant="primary" onClick={approve} disabled={busy !== null}>
-                  {busy === "approve"
-                    ? "Aprobando…"
-                    : `Aprobar${selected.tipo === "D1" ? " (desbloquea D2–D8)" : ""}`}
-                </Button>
+                <>
+                  <Button variant="primary" onClick={approve} disabled={busy !== null}>
+                    {busy === "approve" ? "Aprobando…" : "Aprobar"}
+                  </Button>
+                  <Button variant="danger" onClick={() => setRejecting((r) => !r)} disabled={busy !== null}>
+                    Rechazar
+                  </Button>
+                </>
               )}
               <a href={`/print/${selId}`} target="_blank" className="ml-auto text-sm text-brand hover:underline">
                 Exportar PDF ↗
               </a>
             </div>
+
+            {rejecting && (
+              <div className="rounded-xl border border-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_5%,transparent)] p-3">
+                <textarea
+                  value={rejectText}
+                  onChange={(e) => setRejectText(e.target.value)}
+                  placeholder="¿Qué debe ajustar el operador? Este comentario le llega a la campanita."
+                  className="mb-2 h-20 w-full resize-none rounded-lg border border-[var(--border-card)] bg-background p-2 text-sm outline-none focus:border-[var(--danger)]"
+                />
+                <div className="flex gap-2">
+                  <Button variant="danger" onClick={doReject} disabled={busy !== null}>
+                    {busy === "reject" ? "Enviando…" : "Confirmar rechazo"}
+                  </Button>
+                  <Button variant="ghost" onClick={() => setRejecting(false)}>Cancelar</Button>
+                </div>
+              </div>
+            )}
+
+            <CommentsThread deliverableId={selId} />
           </>
         )}
       </section>
@@ -315,37 +373,75 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
 
 function GateOrControls({
   selected,
+  disponible,
+  faltan,
+  userRol,
   generating,
+  busy,
   instrucciones,
   setInstrucciones,
   onGenerate,
+  onUnlock,
 }: {
   selected: Deliverable;
+  disponible: boolean;
+  faltan: string[];
+  userRol: UserRol;
   generating: boolean;
+  busy: string | null;
   instrucciones: string;
   setInstrucciones: (v: string) => void;
   onGenerate: () => void;
+  onUnlock: () => void;
 }) {
-  const locked = selected.gate_bloqueado && selected.estado === "pendiente";
-  if (locked) {
+  if (!disponible) {
     return (
-      <div className="rounded-md border border-dashed border-border bg-surface p-3 text-sm text-muted">
-        🔒 Bloqueado. Aprueba el <strong>Manual Maestro (D1)</strong> para habilitar este entregable.
+      <div className="rounded-xl border border-dashed border-[var(--border-card)] bg-surface p-4 text-sm text-secondary">
+        <div className="mb-1">
+          🔒 Bloqueado. Este entregable necesita aprobar primero{" "}
+          <strong className="font-mono text-brand">{faltan.join(" · ")}</strong>.
+        </div>
+        <p className="text-xs text-muted">
+          Sigue el camino: cada paso se habilita cuando sus insumos están listos.
+        </p>
+        {userRol === "admin" && (
+          <Button variant="ghost" className="mt-2" onClick={onUnlock} disabled={busy !== null}>
+            {busy === "unlock" ? "Desbloqueando…" : "Desbloquear de todos modos (admin)"}
+          </Button>
+        )}
       </div>
     );
   }
   const isRegen = !!selected.contenido_md;
   return (
-    <div className="rounded-md border border-border bg-surface p-3">
+    <div className="rounded-xl border border-[var(--border-card)] bg-surface p-3.5 shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
       <textarea
         value={instrucciones}
         onChange={(e) => setInstrucciones(e.target.value)}
-        placeholder="Instrucciones adicionales (opcional): 'hazlo más filoso', 'usa la historia del avión'…"
-        className="mb-2 h-16 w-full resize-none rounded-md border border-border bg-background p-2 text-sm outline-none focus:border-brand"
+        placeholder="Instrucciones adicionales (opcional): «hazlo más filoso», «usa la historia del avión»…"
+        className="mb-2.5 h-14 w-full resize-none rounded-lg border border-[var(--border-card)] bg-background p-2.5 font-serif text-[15px] italic text-secondary outline-none placeholder:text-muted focus:border-brand"
       />
-      <Button variant="primary" onClick={onGenerate} disabled={generating}>
-        {generating ? "Generando…" : isRegen ? "Regenerar" : "Generar"}
-      </Button>
+      <div className="flex items-center gap-3">
+        <Button variant="primary" onClick={onGenerate} disabled={generating}>
+          {generating ? "Generando…" : isRegen ? "↻ Regenerar" : "Generar"}
+        </Button>
+        {isRegen && <span className="text-xs text-muted">v{selected.version_actual} · última generación guardada</span>}
+      </div>
+    </div>
+  );
+}
+
+function ValidatorLine({ ok, text }: { ok: boolean; text: string }) {
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 text-xs ${
+        ok
+          ? "border-[var(--border-card)] bg-surface text-[var(--ok)]"
+          : "border-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_6%,transparent)] text-[var(--danger)]"
+      }`}
+    >
+      {ok ? "✓ " : "⚠ "}
+      {text}
     </div>
   );
 }
@@ -353,13 +449,13 @@ function GateOrControls({
 function VoseoPanel({ findings, onFixAll }: { findings: { line: number; match: string; suggestion: string }[]; onFixAll: () => void }) {
   if (findings.length === 0) {
     return (
-      <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-[var(--ok,#1f6b4c)]">
+      <div className="rounded-lg border border-[var(--border-card)] bg-surface px-3 py-2 text-xs text-[var(--ok)]">
         ✓ Sin voseo detectado — español de Chile.
       </div>
     );
   }
   return (
-    <div className="rounded-md border border-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_6%,transparent)] p-3">
+    <div className="rounded-lg border border-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_6%,transparent)] p-3">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-sm font-medium text-[var(--danger)]">
           {findings.length} forma(s) de voseo detectada(s)
@@ -369,7 +465,8 @@ function VoseoPanel({ findings, onFixAll }: { findings: { line: number; match: s
       <ul className="max-h-24 space-y-0.5 overflow-auto text-xs text-muted">
         {findings.slice(0, 20).map((f, i) => (
           <li key={i}>
-            línea {f.line}: <span className="font-mono text-[var(--danger)]">{f.match}</span> → <span className="font-mono">{f.suggestion}</span>
+            línea {f.line}: <span className="font-mono text-[var(--danger)]">{f.match}</span> →{" "}
+            <span className="font-mono">{f.suggestion}</span>
           </li>
         ))}
       </ul>
@@ -380,7 +477,7 @@ function VoseoPanel({ findings, onFixAll }: { findings: { line: number; match: s
 function Checklist({ items }: { items: string[] }) {
   const [checked, setChecked] = useState<boolean[]>(() => items.map(() => false));
   return (
-    <details className="rounded-md border border-border bg-surface p-3 text-sm">
+    <details className="rounded-lg border border-[var(--border-card)] bg-surface p-3 text-sm">
       <summary className="cursor-pointer font-medium">
         Checklist de calidad ({checked.filter(Boolean).length}/{items.length})
       </summary>
@@ -393,11 +490,73 @@ function Checklist({ items }: { items: string[] }) {
               onChange={() => setChecked((c) => c.map((v, j) => (j === i ? !v : v)))}
               className="mt-1"
             />
-            <span className={checked[i] ? "text-muted line-through" : ""}>{it}</span>
+            <span className={checked[i] ? "text-muted line-through" : "text-secondary"}>{it}</span>
           </li>
         ))}
       </ul>
     </details>
+  );
+}
+
+type Cmt = { id: string; texto: string; created_at: string; users: { nombre: string } | null };
+
+function CommentsThread({ deliverableId }: { deliverableId: string }) {
+  const [comments, setComments] = useState<Cmt[]>([]);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getComments(deliverableId).then((c) => {
+      if (active) setComments(c as unknown as Cmt[]);
+    });
+    return () => {
+      active = false;
+    };
+  }, [deliverableId]);
+
+  async function send() {
+    if (!text.trim() || sending) return;
+    setSending(true);
+    try {
+      await addComment(deliverableId, text);
+      setText("");
+      setComments((await getComments(deliverableId)) as unknown as Cmt[]);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-[var(--border-card)] bg-surface p-3">
+      <div className="mb-2 font-mono text-[10px] uppercase tracking-wider text-muted">
+        Comentarios ({comments.length})
+      </div>
+      {comments.length > 0 && (
+        <ul className="mb-2 space-y-2">
+          {comments.map((c) => (
+            <li key={c.id} className="border-l-2 border-[var(--border)] pl-2 text-sm">
+              <span className="text-secondary">{c.texto}</span>
+              <span className="mt-0.5 block text-[10px] text-muted">
+                {c.users?.nombre ?? "—"} · {new Date(c.created_at).toLocaleString("es-CL")}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-2">
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && send()}
+          placeholder="Agregar un comentario…"
+          className="flex-1 rounded-lg border border-[var(--border-card)] bg-background px-2.5 py-1.5 text-sm outline-none focus:border-brand"
+        />
+        <Button variant="secondary" onClick={send} disabled={sending || !text.trim()}>
+          {sending ? "…" : "Enviar"}
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -414,7 +573,7 @@ function VersionHistory({ deliverableId, onRestore }: { deliverableId: string; o
     <div className="relative">
       <Button variant="ghost" onClick={toggle}>Historial</Button>
       {open && (
-        <div className="absolute right-0 z-10 mt-1 w-64 rounded-md border border-border bg-surface p-2 shadow-lg">
+        <div className="absolute right-0 z-10 mt-1 w-64 rounded-xl border border-[var(--border-card)] bg-surface p-2 shadow-lg">
           {!versions || versions.length === 0 ? (
             <p className="p-2 text-xs text-muted">Sin versiones aún.</p>
           ) : (

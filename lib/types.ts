@@ -47,6 +47,18 @@ export interface Deliverable {
   estado: DeliverableEstado; contenido_md: string | null; version_actual: number;
   aprobado_por: string | null; aprobado_at: string | null; publicado_at: string | null;
   pdf_url: string | null; orden: number; gate_bloqueado: boolean;
+  desbloqueo_manual: boolean;
+}
+
+export interface Notification {
+  id: string; target_rol: UserRol | null; user_id: string | null;
+  project_id: string | null; deliverable_id: string | null;
+  tipo: string; texto: string; leido: boolean; created_at: string;
+}
+
+export interface Comment {
+  id: string; deliverable_id: string; user_id: string | null;
+  texto: string; resuelto: boolean; created_at: string;
 }
 
 export interface DeliverableVersion {

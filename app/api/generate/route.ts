@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser, isStaff, jsonError } from "@/lib/auth/roles";
 import { createGenerationStream } from "@/lib/anthropic";
 import { assembleGeneration } from "@/lib/prompts/assemble";
+import { computeAvailability } from "@/lib/pipeline";
 import type { Deliverable, InputRow, ModuleTemplate, VoiceDoc } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -23,8 +24,16 @@ export async function POST(req: NextRequest) {
     .eq("id", deliverableId)
     .single<Deliverable>();
   if (!deliverable) return jsonError(404, "Entregable no encontrado");
-  if (deliverable.gate_bloqueado && deliverable.estado === "pendiente") {
-    return jsonError(423, "Bloqueado: aprueba el Manual Maestro (D1) primero");
+
+  // Gate por dependencias (DAG). Admin puede saltarlo; desbloqueo_manual también.
+  const { data: allDelivs } = await supabase
+    .from("deliverables")
+    .select("tipo, estado, desbloqueo_manual")
+    .eq("project_id", deliverable.project_id);
+  const avail = computeAvailability(allDelivs ?? []);
+  if (!avail[deliverable.tipo]?.disponible && user!.rol !== "admin") {
+    const faltan = avail[deliverable.tipo]?.faltan ?? [];
+    return jsonError(423, `Bloqueado: primero aprueba ${faltan.join(", ")}`);
   }
 
   const { data: template } = await supabase
