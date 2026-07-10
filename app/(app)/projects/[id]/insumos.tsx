@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import type { CitaCanon, InputRow, LexiconEntry, VoiceDoc } from "@/lib/types";
-import { addInput, saveVoiceDoc } from "../actions";
+import { addInput, saveVoiceDoc, extractVoiceFromD0 } from "../actions";
 
 const INPUT_LABEL: Record<string, string> = {
   transcripcion: "Transcripción",
@@ -33,7 +33,11 @@ export default function InsumosPanel({
       {pane === "insumos" ? (
         <InsumosTab projectId={projectId} inputs={inputs} />
       ) : (
-        <VoiceTab projectId={projectId} voiceDoc={voiceDoc} />
+        <VoiceTab
+          key={`${voiceDoc?.lexicon?.length ?? 0}-${voiceDoc?.citas_canon?.length ?? 0}-${voiceDoc?.lineas_rojas?.length ?? 0}`}
+          projectId={projectId}
+          voiceDoc={voiceDoc}
+        />
       )}
       <p className="px-1 text-xs text-muted">
         Los insumos alimentan la generación. El Documento de Voz se inyecta en todos los entregables.
@@ -122,6 +126,23 @@ function VoiceTab({ projectId, voiceDoc }: { projectId: string; voiceDoc: VoiceD
   const [rojas, setRojas] = useState<string[]>(voiceDoc?.lineas_rojas ?? []);
   const [saving, setSaving] = useState(false);
   const [flash, setFlash] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+
+  const vacio =
+    lexicon.length === 0 && citas.length === 0 && si.length === 0 && no.length === 0 && rojas.length === 0;
+
+  async function extraer() {
+    if (extracting) return;
+    setExtracting(true);
+    try {
+      await extractVoiceFromD0(projectId);
+      router.refresh(); // el key remonta el tab con la voz extraída
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "No se pudo extraer");
+    } finally {
+      setExtracting(false);
+    }
+  }
 
   async function save() {
     if (saving) return;
@@ -143,6 +164,17 @@ function VoiceTab({ projectId, voiceDoc }: { projectId: string; voiceDoc: VoiceD
 
   return (
     <div className="space-y-3 text-xs">
+      <div className="rounded-lg border border-dashed border-[var(--border-card)] bg-subtle p-2.5 text-xs text-secondary">
+        {vacio ? (
+          <>Se llena automáticamente al generar <strong>D0</strong>. ¿Ya lo generaste?{" "}</>
+        ) : (
+          <>Extraído del D0. Puedes corregir las tablas y guardar.{" "}</>
+        )}
+        <button onClick={extraer} disabled={extracting} className="font-medium text-brand hover:underline disabled:opacity-50">
+          {extracting ? "Extrayendo…" : "Extraer del D0"}
+        </button>
+      </div>
+
       <Section title={`Lexicón (${lexicon.length})`}>
         {lexicon.map((l, i) => (
           <div key={i} className="space-y-1 rounded-md border border-[var(--border-card)] bg-background p-1.5">

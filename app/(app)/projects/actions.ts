@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser, isStaff, isAdmin } from "@/lib/auth/roles";
+import { extractVoiceFromMarkdown } from "@/lib/voice-extract";
 import type { DeliverableTipo, GeneradoPor } from "@/lib/types";
 
 const DELIVERABLE_NAMES: Record<DeliverableTipo, string> = {
@@ -289,6 +290,30 @@ export async function getVersions(deliverableId: string) {
     .eq("deliverable_id", deliverableId)
     .order("version", { ascending: false });
   return data ?? [];
+}
+
+// Extrae el Documento de Voz desde el D0 generado y lo persiste en voice_docs.
+export async function extractVoiceFromD0(projectId: string) {
+  const user = await getCurrentUser();
+  if (!isStaff(user)) throw new Error("No autorizado");
+  const supabase = await createClient();
+  const { data: d0 } = await supabase
+    .from("deliverables")
+    .select("contenido_md")
+    .eq("project_id", projectId)
+    .eq("tipo", "D0")
+    .single();
+  const voice = extractVoiceFromMarkdown(d0?.contenido_md);
+  if (!voice) {
+    throw new Error("El D0 aún no tiene el bloque de Documento de Voz. Genera D0 primero.");
+  }
+  const { error } = await supabase
+    .from("voice_docs")
+    .update({ ...voice, updated_at: new Date().toISOString() })
+    .eq("project_id", projectId);
+  if (error) throw new Error(error.message);
+  await log(projectId, user!.id, "voz_extraida_de_d0");
+  revalidatePath(`/projects/${projectId}`);
 }
 
 export async function saveVoiceDoc(projectId: string, voice: {

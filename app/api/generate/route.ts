@@ -4,6 +4,7 @@ import { getCurrentUser, isStaff, jsonError } from "@/lib/auth/roles";
 import { createGenerationStream } from "@/lib/anthropic";
 import { assembleGeneration } from "@/lib/prompts/assemble";
 import { computeAvailability } from "@/lib/pipeline";
+import { extractVoiceFromMarkdown } from "@/lib/voice-extract";
 import type { Deliverable, InputRow, ModuleTemplate, VoiceDoc } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -124,6 +125,17 @@ export async function POST(req: NextRequest) {
         accion: "generado",
         detalle: `${deliverable.tipo} v${nextVersion} (plantilla v${template.version})`,
       });
+
+      // D0 puebla el Documento de Voz estructurado (fuente para todas las generaciones).
+      if (deliverable.tipo === "D0") {
+        const voice = extractVoiceFromMarkdown(acc);
+        if (voice) {
+          await supabase
+            .from("voice_docs")
+            .update({ ...voice, updated_at: new Date().toISOString() })
+            .eq("project_id", deliverable.project_id);
+        }
+      }
 
       controller.close();
     },
