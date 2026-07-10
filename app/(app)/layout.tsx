@@ -13,7 +13,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const supabase = await createClient();
   const [{ data: notifs }, { count: pendientes }] = await Promise.all([
     supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(15),
-    supabase.from("messages").select("id", { count: "exact", head: true }).eq("resuelto", false),
+    supabase
+      .from("messages")
+      .select("id", { count: "exact", head: true })
+      .eq("resuelto", false)
+      .eq("de_equipo", false),
   ]);
   const notifications = (notifs ?? []) as Notification[];
   const unread = notifications.filter((n) => !n.leido).length;

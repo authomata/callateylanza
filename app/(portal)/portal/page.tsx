@@ -49,7 +49,7 @@ export default async function PortalPage() {
     .maybeSingle();
   const landing = project ? await getLandingStatus(project.id) : null;
 
-  const [{ data: pubs }, { data: assets }, { data: library }] = await Promise.all([
+  const [{ data: pubs }, { data: assets }, { data: library }, { data: mensajes }] = await Promise.all([
     supabase.from("deliverables").select("id, tipo, titulo, publicado_at").eq("estado", "publicado"),
     supabase.from("assets").select("id, tipo, categoria, file_url").eq("publicado", true),
     supabase
@@ -57,6 +57,13 @@ export default async function PortalPage() {
       .select("id, seccion, titulo, embed_url, descripcion, orden, activo")
       .eq("activo", true)
       .order("orden"),
+    project
+      ? supabase
+          .from("messages")
+          .select("id, texto, de_equipo, created_at")
+          .eq("project_id", project.id)
+          .order("created_at")
+      : Promise.resolve({ data: [] }),
   ]);
 
   const byTipo = new Map((pubs ?? []).map((d) => [d.tipo, d]));
@@ -155,8 +162,8 @@ export default async function PortalPage() {
       {/* biblioteca */}
       <LibrarySection items={library ?? []} />
 
-      {/* contacto */}
-      <ContactForm projectId={project?.id ?? null} />
+      {/* conversación */}
+      <ContactForm projectId={project?.id ?? null} messages={(mensajes ?? []) as never} />
     </div>
   );
 }
