@@ -527,6 +527,23 @@ create policy projects_client on projects for select to authenticated
     select 1 from clients c where c.id = projects.client_id and c.user_id = auth.uid()
   ));
 
+-- ─── 0006_landing.sql ───
+
+-- Fase 3-E — Landing (D5) en dos pasos:
+--   1) deploy inmediato a la cuenta Netlify de Andrés (entrega rápida)
+--   2) traspaso: re-deploy a la cuenta Netlify del propio cliente (queda en su poder)
+-- Idempotente.
+
+-- site en la cuenta de Andrés → projects.netlify_site_id (ya existe desde 0005)
+-- site en la cuenta del cliente:
+alter table projects add column if not exists netlify_client_site_id text;
+
+-- de quién es la URL vigente: 'andres' | 'cliente'
+alter table projects add column if not exists landing_owner text;
+
+-- projects.netlify_token (token personal del cliente) ya existe desde 0005.
+-- NUNCA se expone al browser: solo se lee server-side con service role.
+
 -- ─── seed (D0/D1) ───
 
 -- Seed: module_templates v1 (D0 + D1 active, D2–D8 inactive stubs).

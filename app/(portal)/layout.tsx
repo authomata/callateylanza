@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/roles";
 
@@ -9,11 +10,15 @@ export default async function PortalLayout({ children }: { children: React.React
     <div className="flex min-h-full flex-col">
       <header className="border-b border-border bg-surface">
         <div className="mx-auto flex h-[58px] max-w-[1000px] items-center justify-between px-6">
-          <span className="font-mono text-[13px] font-semibold uppercase tracking-[0.22em] text-brand">
-            Cállate y Lanza
-          </span>
+          <Link href="/portal">
+            <span className="font-mono text-[13px] font-semibold uppercase tracking-[0.22em] text-brand">
+              Cállate y Lanza
+            </span>
+          </Link>
           <div className="flex items-center gap-4 text-sm">
-            <span className="text-secondary">{user.nombre}</span>
+            <Link href="/portal/perfil" className="text-secondary hover:text-foreground">
+              {user.nombre}
+            </Link>
             <form action="/auth/signout" method="post">
               <button className="text-muted hover:text-foreground">Salir</button>
             </form>

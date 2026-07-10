@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth/roles";
 import { PROJECT_ESTADO } from "@/lib/estados";
 import ProjectWorkspace from "./workspace";
 import { InviteClient } from "./invite-client";
+import { ClientEditor } from "./client-editor";
 import type { Deliverable, InputRow, ModuleTemplate, VoiceDoc } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
 
   const { data: project } = await supabase
     .from("projects")
-    .select("id, nombre, estado, fecha_dia7, clients(nombre, slug, ciudad, rubro, email)")
+    .select("id, nombre, estado, fecha_dia7, clients(id, nombre, slug, ciudad, rubro, email)")
     .eq("id", id)
     .single();
   if (!project) notFound();
@@ -29,7 +30,9 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       supabase.from("module_templates").select("tipo, version, nombre, inputs_requeridos, checklist_calidad, activa").eq("activa", true),
     ]);
 
-  const client = (project as unknown as { clients: { nombre: string; ciudad: string | null; rubro: string | null } }).clients;
+  const client = (project as unknown as {
+    clients: { id: string; nombre: string; ciudad: string | null; rubro: string | null; email: string | null };
+  }).clients;
 
   return (
     <div className="space-y-4">
@@ -47,7 +50,10 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
             {PROJECT_ESTADO[project.estado as keyof typeof PROJECT_ESTADO]}
           </p>
         </div>
-        {user!.rol === "admin" && <InviteClient projectId={id} />}
+        <div className="flex items-start gap-2">
+          <ClientEditor projectId={id} client={client} />
+          {user!.rol === "admin" && <InviteClient projectId={id} />}
+        </div>
       </div>
 
       <ProjectWorkspace

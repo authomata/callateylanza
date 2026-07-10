@@ -198,6 +198,28 @@ export async function publicar(deliverableId: string) {
   revalidatePath(`/projects/${d.project_id}`);
 }
 
+// Editar los datos del cliente (staff). El email habilita la invitación al portal.
+export async function updateClient(formData: FormData) {
+  const user = await getCurrentUser();
+  if (!isStaff(user)) throw new Error("No autorizado");
+  const projectId = String(formData.get("project_id"));
+  const clientId = String(formData.get("client_id"));
+  const supabase = await createClient();
+
+  const patch = {
+    nombre: String(formData.get("nombre") || "").trim(),
+    email: String(formData.get("email") || "").trim() || null,
+    ciudad: String(formData.get("ciudad") || "").trim() || null,
+    rubro: String(formData.get("rubro") || "").trim() || null,
+  };
+  if (!patch.nombre) throw new Error("El nombre no puede quedar vacío");
+
+  const { error } = await supabase.from("clients").update(patch).eq("id", clientId);
+  if (error) throw new Error(error.message);
+  await log(projectId, user!.id, "cliente_actualizado", patch.nombre);
+  revalidatePath(`/projects/${projectId}`);
+}
+
 // Invitar al cliente a su portal: crea/liga su cuenta con rol 'cliente' y devuelve un magic link.
 export async function invitarCliente(projectId: string): Promise<string> {
   const user = await getCurrentUser();

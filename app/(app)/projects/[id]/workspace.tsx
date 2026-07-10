@@ -6,6 +6,7 @@ import { Badge, Button } from "@/components/ui";
 import { DocView } from "@/components/doc-view";
 import { PipelineRail } from "@/components/pipeline-rail";
 import { AssetManager } from "@/components/asset-manager";
+import { LandingPanel } from "@/components/landing-panel";
 import { DELIVERABLE_ESTADO } from "@/lib/estados";
 import { autoCorrectVoseo } from "@/lib/validators/voseo";
 import { runValidators } from "@/lib/validators";
@@ -388,6 +389,8 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
             {(selected.tipo === "D6" || selected.tipo === "D8") && (
               <AssetManager projectId={projectId} deliverableId={selId} tipo={selected.tipo} />
             )}
+
+            {selected.tipo === "D5" && <LandingPanel projectId={projectId} />}
 
             <CommentsThread deliverableId={selId} />
           </>

@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth/roles";
 import type { DeliverableTipo } from "@/lib/types";
 import { LibrarySection } from "@/components/library-embed";
+import { getLandingStatus } from "@/app/actions/landing";
+import { LandingCard } from "./landing-card";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +38,15 @@ export default async function PortalPage() {
       </div>
     );
   }
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("client_id", clientRow.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const landing = project ? await getLandingStatus(project.id) : null;
 
   const [{ data: pubs }, { data: assets }, { data: library }] = await Promise.all([
     supabase.from("deliverables").select("id, tipo, titulo, publicado_at").eq("estado", "publicado"),
@@ -104,6 +115,17 @@ export default async function PortalPage() {
           })}
         </div>
       </section>
+
+      {/* landing */}
+      {project && landing && (
+        <LandingCard
+          projectId={project.id}
+          landingUrl={landing.landingUrl}
+          owner={landing.owner}
+          hasClientToken={landing.hasClientToken}
+          hasClientSite={landing.hasClientSite}
+        />
+      )}
 
       {/* galería */}
       {(fotos.length > 0 || videos.length > 0) && (
