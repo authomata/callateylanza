@@ -79,6 +79,26 @@ export function LandingPanel({ projectId }: { projectId: string }) {
         </a>
       )}
 
+      {/* ¿lo que se va a publicar es una landing real o solo el copy? */}
+      {status.hasCopy && (
+        <div
+          className={`rounded-lg border px-3 py-2 text-xs ${
+            status.hasRealLanding
+              ? "border-[var(--border-card)] bg-surface text-[var(--ok)]"
+              : "border-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_6%,transparent)] text-[var(--danger)]"
+          }`}
+        >
+          {status.hasRealLanding ? (
+            "✓ El D5 trae la landing HTML lista para publicar."
+          ) : (
+            <>
+              ⚠ El D5 solo tiene el <strong>copy</strong>: se publicaría el documento, no una landing.
+              Regenera D5 para obtener la página real.
+            </>
+          )}
+        </div>
+      )}
+
       {/* Paso 1 */}
       <div className="rounded-lg border border-[var(--border-card)] p-3">
         <div className="text-sm font-medium">Paso 1 · Publicar ya</div>

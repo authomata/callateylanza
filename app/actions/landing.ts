@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUser, isStaff } from "@/lib/auth/roles";
 import { buildLandingHtml, deployLanding } from "@/lib/netlify";
+import { extractLandingHtml } from "@/lib/landing-html";
 
 // Staff, o el cliente dueño del proyecto.
 async function requireProjectAccess(projectId: string): Promise<{ staff: boolean }> {
@@ -41,24 +42,42 @@ async function loadLandingInputs(projectId: string) {
   if (!d5?.contenido_md?.trim()) {
     throw new Error("La landing (D5) aún no tiene contenido. Genérala primero.");
   }
-  return { admin, proj, client, d5 };
+
+  // La landing real viene como bloque ```html``` en D5 (prompt v2).
+  // Si no está, publicamos el copy renderizado como fallback.
+  const real = extractLandingHtml(d5.contenido_md);
+  const html = real ?? buildLandingHtml(d5.contenido_md, { titulo: client.nombre });
+
+  return { admin, proj, client, d5, html, esLandingReal: !!real };
 }
 
 // Estado seguro para la UI. NUNCA devuelve el token.
 export async function getLandingStatus(projectId: string) {
   await requireProjectAccess(projectId);
   const admin = createAdminClient();
-  const { data } = await admin
-    .from("projects")
-    .select("landing_url, landing_owner, netlify_token, netlify_site_id, netlify_client_site_id")
-    .eq("id", projectId)
-    .single();
+  const [{ data }, { data: d5 }] = await Promise.all([
+    admin
+      .from("projects")
+      .select("landing_url, landing_owner, netlify_token, netlify_site_id, netlify_client_site_id")
+      .eq("id", projectId)
+      .single(),
+    admin
+      .from("deliverables")
+      .select("contenido_md")
+      .eq("project_id", projectId)
+      .eq("tipo", "D5")
+      .maybeSingle(),
+  ]);
+
   return {
     landingUrl: (data?.landing_url as string) ?? null,
     owner: (data?.landing_owner as string) ?? null,
     hasClientToken: !!data?.netlify_token,
     hasStagingSite: !!data?.netlify_site_id,
     hasClientSite: !!data?.netlify_client_site_id,
+    // ¿el D5 ya trae la landing HTML lista, o solo el copy?
+    hasRealLanding: !!extractLandingHtml(d5?.contenido_md),
+    hasCopy: !!d5?.contenido_md?.trim(),
   };
 }
 
@@ -70,8 +89,7 @@ export async function deployLandingAndres(projectId: string): Promise<string> {
   const token = process.env.NETLIFY_AUTH_TOKEN;
   if (!token) throw new Error("Falta NETLIFY_AUTH_TOKEN en el servidor.");
 
-  const { admin, proj, client, d5 } = await loadLandingInputs(projectId);
-  const html = buildLandingHtml(d5.contenido_md!, { titulo: client.nombre });
+  const { admin, proj, client, html } = await loadLandingInputs(projectId);
   const { siteId, url } = await deployLanding({
     token,
     siteId: (proj.netlify_site_id as string) ?? null,
@@ -114,12 +132,11 @@ export async function saveClientNetlifyToken(projectId: string, token: string): 
 // PASO 2 — traspaso: re-deploy del mismo sitio a la cuenta Netlify del cliente.
 export async function deployLandingCliente(projectId: string): Promise<string> {
   await requireProjectAccess(projectId);
-  const { admin, proj, client, d5 } = await loadLandingInputs(projectId);
+  const { admin, proj, client, html } = await loadLandingInputs(projectId);
 
   const token = proj.netlify_token as string | null;
   if (!token) throw new Error("El cliente aún no conectó su cuenta de Netlify.");
 
-  const html = buildLandingHtml(d5.contenido_md!, { titulo: client.nombre });
   const { siteId, url } = await deployLanding({
     token,
     siteId: (proj.netlify_client_site_id as string) ?? null,
