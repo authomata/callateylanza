@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUser, isStaff, isAdmin } from "@/lib/auth/roles";
 import { extractVoiceFromMarkdown } from "@/lib/voice-extract";
+import { notifyEmail, notifyRole, appOrigin } from "@/lib/email";
 import type { DeliverableTipo, GeneradoPor } from "@/lib/types";
 
 const DELIVERABLE_NAMES: Record<DeliverableTipo, string> = {
@@ -194,6 +195,24 @@ export async function publicar(deliverableId: string) {
     tipo: "publicado",
     texto: `${d.tipo} — ${d.titulo} se publicó al portal del cliente.`,
   });
+
+  // Avisar al cliente por correo (solo si ya tiene cuenta/portal).
+  const { data: proj } = await supabase
+    .from("projects")
+    .select("clients(nombre, email, user_id)")
+    .eq("id", d.project_id)
+    .single();
+  const cli = (proj as unknown as { clients: { nombre: string; email: string | null; user_id: string | null } | null })?.clients;
+  if (cli?.email && cli.user_id) {
+    const origin = await appOrigin();
+    await notifyEmail(cli.email, `Nuevo en tu kit: ${d.titulo}`, {
+      titulo: `${cli.nombre.split(" ")[0]}, sumamos una pieza a tu kit`,
+      cuerpo: `<p>Ya puedes leer y descargar <strong>${d.titulo}</strong> en tu portal.</p>`,
+      ctaUrl: `${origin}/portal`,
+      ctaText: "Ver mi kit",
+    });
+  }
+
   await log(d.project_id, user!.id, "publicado", d.tipo);
   revalidatePath(`/projects/${d.project_id}`);
 }
@@ -259,19 +278,36 @@ export async function invitarCliente(projectId: string): Promise<string> {
   await admin.from("users").update({ rol: "cliente", nombre: client.nombre }).eq("id", userId);
   await admin.from("clients").update({ user_id: userId }).eq("id", client.id);
 
-  // 3) magic link de acceso al portal
+  // 3) link de acceso al portal.
+  // Usamos el token_hash contra NUESTRA ruta /auth/confirm en vez del action_link de Supabase:
+  // el action_link depende del Site URL y devuelve los tokens en el fragmento (#), que nunca
+  // llega al servidor. Con token_hash verificamos server-side y dejamos la sesión en cookie.
   const h = await headers();
   const origin = `${h.get("x-forwarded-proto") ?? "http"}://${h.get("host")}`;
   const { data: link, error: linkErr } = await admin.auth.admin.generateLink({
     type: "magiclink",
     email: client.email,
-    options: { redirectTo: `${origin}/auth/callback?next=/portal` },
   });
   if (linkErr) throw new Error(linkErr.message);
 
+  const inviteUrl =
+    `${origin}/auth/confirm?token_hash=${link.properties.hashed_token}` +
+    `&type=magiclink&next=${encodeURIComponent("/portal")}`;
+
+  // Se lo mandamos por correo, y además lo devolvemos para copiar/pegar.
+  await notifyEmail(client.email, "Tu kit de marca ya tiene portal", {
+    titulo: `${client.nombre.split(" ")[0]}, entra a tu kit`,
+    cuerpo:
+      `<p>Ya puedes entrar a tu portal privado: ahí vas a ver tu kit de marca personal, ` +
+      `descargar tus entregables y seguir el avance.</p>` +
+      `<p>Este enlace es de un solo uso. Si expira, pídeme otro.</p>`,
+    ctaUrl: inviteUrl,
+    ctaText: "Entrar a mi portal",
+  });
+
   await log(projectId, user!.id, "cliente_invitado", client.email);
   revalidatePath(`/projects/${projectId}`);
-  return link.properties.action_link;
+  return inviteUrl;
 }
 
 // ── Assets (galerías D6/D8) ──────────────────────────────────────────────────
@@ -357,7 +393,7 @@ export async function setDeliverableEstado(deliverableId: string, estado: string
   if (error) throw new Error(error.message);
   if (d) {
     await log(d.project_id, user!.id, "estado_cambiado", `${d.tipo} → ${estado}`);
-    // Al marcar listo, avisar al admin (campanita).
+    // Al marcar listo, avisar al admin (campanita + email).
     if (estado === "listo_para_revision") {
       await supabase.from("notifications").insert({
         target_rol: "admin",
@@ -365,6 +401,13 @@ export async function setDeliverableEstado(deliverableId: string, estado: string
         deliverable_id: deliverableId,
         tipo: "listo_para_revision",
         texto: `${user!.nombre} marcó ${d.tipo} — ${d.titulo} listo para revisión.`,
+      });
+      const origin = await appOrigin();
+      await notifyRole("admin", `Listo para revisión: ${d.tipo} — ${d.titulo}`, {
+        titulo: "Hay algo esperando tu revisión",
+        cuerpo: `<p><strong>${user!.nombre}</strong> marcó <strong>${d.tipo} — ${d.titulo}</strong> como listo para revisión.</p>`,
+        ctaUrl: `${origin}/projects/${d.project_id}`,
+        ctaText: "Revisar entregable",
       });
     }
     revalidatePath(`/projects/${d.project_id}`);
@@ -397,6 +440,17 @@ export async function rechazar(deliverableId: string, comentario: string) {
     tipo: "rechazado",
     texto: `Andrés devolvió ${d.tipo} — ${d.titulo} con cambios. Revisa el comentario.`,
   });
+
+  const origin = await appOrigin();
+  await notifyRole("operador", `Devuelto con cambios: ${d.tipo} — ${d.titulo}`, {
+    titulo: "Un entregable volvió con comentarios",
+    cuerpo:
+      `<p><strong>${d.tipo} — ${d.titulo}</strong> necesita ajustes.</p>` +
+      `<p style="border-left:3px solid #bc5b34;padding-left:12px;font-style:italic;color:#1a1712">${comentario.trim()}</p>`,
+    ctaUrl: `${origin}/projects/${d.project_id}`,
+    ctaText: "Ver el entregable",
+  });
+
   await log(d.project_id, user!.id, "rechazado", d.tipo);
   revalidatePath(`/projects/${d.project_id}`);
 }
