@@ -8,6 +8,7 @@ import type { Notification } from "@/lib/types";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  if (user.rol === "cliente") redirect("/portal");
 
   const supabase = await createClient();
   const { data: notifs } = await supabase
@@ -33,9 +34,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 Proyectos
               </Link>
               {user.rol === "admin" && (
-                <Link href="/templates" className="text-secondary hover:text-foreground">
-                  Plantillas
-                </Link>
+                <>
+                  <Link href="/templates" className="text-secondary hover:text-foreground">
+                    Plantillas
+                  </Link>
+                  <Link href="/library" className="text-secondary hover:text-foreground">
+                    Biblioteca
+                  </Link>
+                </>
               )}
             </nav>
           </div>

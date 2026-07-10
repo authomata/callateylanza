@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentUser, isStaff } from "@/lib/auth/roles";
+import { getCurrentUser } from "@/lib/auth/roles";
 import type { CitaCanon, VoiceDoc } from "@/lib/types";
 import PrintButton from "./print-button";
 
@@ -15,8 +15,9 @@ const DELIVERABLE_NUM: Record<string, string> = {
 export default async function PrintPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await getCurrentUser();
-  if (!isStaff(user)) notFound();
+  if (!user) notFound();
 
+  // RLS decide la visibilidad: staff ve todo; el cliente solo sus entregables publicados.
   const supabase = await createClient();
   const { data: d } = await supabase
     .from("deliverables")

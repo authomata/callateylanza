@@ -1,5 +1,7 @@
 -- Cállate y Lanza — setup completo (fresh install). Pega en SQL Editor → Run.
 
+-- ─── 0001_init.sql ───
+
 -- Cállate y Lanza — esquema inicial (spec §6). Full schema; Fase 1 uses a subset.
 -- Requires Supabase (pgcrypto/gen_random_uuid available by default).
 
@@ -273,7 +275,7 @@ create policy assets_client on assets for select to authenticated using (
   )
 );
 
--- ─── 0002_auth_hook ───
+-- ─── 0002_auth_hook.sql ───
 
 -- Auto-provision a public.users row whenever someone authenticates for the first time.
 -- Role is derived from an admin allowlist; everyone else starts as 'operador'.
@@ -303,7 +305,7 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- ─── 0003_fase2 ───
+-- ─── 0003_fase2.sql ───
 
 -- Fase 2 — override de camino + notificaciones.
 
@@ -339,7 +341,7 @@ create policy notif_update on notifications for update to authenticated using (
 drop policy if exists notif_insert on notifications;
 create policy notif_insert on notifications for insert to authenticated with check (public.is_staff());
 
--- ─── 0004_templates_v2 ───
+-- ─── 0004_templates_v2.sql ───
 
 -- Fase 2 — activar generadores D2–D8 con prompts v1 reales (destilados de spec §5).
 -- inputs_requeridos siguen el DAG de lib/pipeline.ts. Idempotente (upsert por tipo,version).
@@ -488,6 +490,42 @@ $e$6 guiones verticales (pieza D2, gancho hablado, desarrollo, cierre, prompt de
 $c$["6 guiones, cada uno ligado a una pieza del calendario D2","Cada guion sigue Gancho → Ancla (no vacía) → Bajada","Prompt de producción con specs 9:16 + subtítulos + duración","Nota de pauta para ads","Español de Chile / tuteo (sin voseo)"]$c$::jsonb,
 true)
 on conflict (tipo, version) do update set nombre=excluded.nombre, prompt_sistema=excluded.prompt_sistema, estructura_output=excluded.estructura_output, inputs_requeridos=excluded.inputs_requeridos, checklist_calidad=excluded.checklist_calidad, activa=true, updated_at=now();
+
+-- ─── 0005_fase3.sql ───
+
+-- Fase 3 — entrega y portal. Idempotente.
+
+-- Landing (D5) self-service por cliente: guarda su token de Netlify + el site desplegado.
+alter table projects add column if not exists netlify_token   text;
+alter table projects add column if not exists netlify_site_id text;
+alter table projects add column if not exists landing_url      text;
+
+-- ── Storage: bucket público de assets (fotos D6 / videos D8 / pdfs) ──────────
+insert into storage.buckets (id, name, public)
+values ('assets', 'assets', true)
+on conflict (id) do nothing;
+
+drop policy if exists "assets staff write"  on storage.objects;
+drop policy if exists "assets staff update" on storage.objects;
+drop policy if exists "assets staff delete" on storage.objects;
+drop policy if exists "assets public read"  on storage.objects;
+
+create policy "assets staff write"  on storage.objects for insert to authenticated with check (bucket_id = 'assets' and public.is_staff());
+create policy "assets staff update" on storage.objects for update to authenticated using (bucket_id = 'assets' and public.is_staff());
+create policy "assets staff delete" on storage.objects for delete to authenticated using (bucket_id = 'assets' and public.is_staff());
+create policy "assets public read"  on storage.objects for select using (bucket_id = 'assets');
+
+-- ── RLS del portal: el cliente lee SU cliente y SU proyecto ──────────────────
+-- (deliverables/assets publicados y library_items activos ya tienen policy desde 0001.)
+drop policy if exists clients_owner on clients;
+create policy clients_owner on clients for select to authenticated
+  using (user_id = auth.uid());
+
+drop policy if exists projects_client on projects;
+create policy projects_client on projects for select to authenticated
+  using (exists (
+    select 1 from clients c where c.id = projects.client_id and c.user_id = auth.uid()
+  ));
 
 -- ─── seed (D0/D1) ───
 

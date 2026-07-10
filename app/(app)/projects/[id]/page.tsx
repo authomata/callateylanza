@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth/roles";
 import { PROJECT_ESTADO } from "@/lib/estados";
 import ProjectWorkspace from "./workspace";
+import { InviteClient } from "./invite-client";
 import type { Deliverable, InputRow, ModuleTemplate, VoiceDoc } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -46,6 +47,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
             {PROJECT_ESTADO[project.estado as keyof typeof PROJECT_ESTADO]}
           </p>
         </div>
+        {user!.rol === "admin" && <InviteClient projectId={id} />}
       </div>
 
       <ProjectWorkspace

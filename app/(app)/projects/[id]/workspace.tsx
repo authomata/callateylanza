@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Badge, Button } from "@/components/ui";
 import { DocView } from "@/components/doc-view";
 import { PipelineRail } from "@/components/pipeline-rail";
+import { AssetManager } from "@/components/asset-manager";
 import { DELIVERABLE_ESTADO } from "@/lib/estados";
 import { autoCorrectVoseo } from "@/lib/validators/voseo";
 import { runValidators } from "@/lib/validators";
@@ -20,6 +21,7 @@ import {
   rechazar,
   addComment,
   getComments,
+  publicar,
 } from "../actions";
 import InsumosPanel from "./insumos";
 
@@ -60,7 +62,7 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
 
   const [instrucciones, setInstrucciones] = useState("");
   const [generating, setGenerating] = useState(false);
-  const [busy, setBusy] = useState<null | "listo" | "approve" | "save" | "unlock" | "reject">(null);
+  const [busy, setBusy] = useState<null | "listo" | "approve" | "save" | "unlock" | "reject" | "publish">(null);
   const [rejecting, setRejecting] = useState(false);
   const [rejectText, setRejectText] = useState("");
   const [flash, setFlash] = useState<string | null>(null);
@@ -196,6 +198,21 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
       setRejectText("");
       showFlash("Devuelto con comentarios ✓");
       router.refresh();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function publish() {
+    if (busy) return;
+    setBusy("publish");
+    try {
+      await publicar(selId);
+      patchItem(selId, { estado: "publicado" });
+      showFlash("Publicado al portal del cliente ✓");
+      router.refresh();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "No se pudo publicar");
     } finally {
       setBusy(null);
     }
@@ -338,6 +355,14 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
                   </Button>
                 </>
               )}
+              {userRol === "admin" && selected.estado === "aprobado" && (
+                <Button variant="primary" onClick={publish} disabled={busy !== null}>
+                  {busy === "publish" ? "Publicando…" : "Publicar al portal"}
+                </Button>
+              )}
+              {selected.estado === "publicado" && (
+                <span className="text-xs text-[var(--ok)]">● Publicado al portal</span>
+              )}
               <a href={`/print/${selId}`} target="_blank" className="ml-auto text-sm text-brand hover:underline">
                 Exportar PDF ↗
               </a>
@@ -358,6 +383,10 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
                   <Button variant="ghost" onClick={() => setRejecting(false)}>Cancelar</Button>
                 </div>
               </div>
+            )}
+
+            {(selected.tipo === "D6" || selected.tipo === "D8") && (
+              <AssetManager projectId={projectId} deliverableId={selId} tipo={selected.tipo} />
             )}
 
             <CommentsThread deliverableId={selId} />

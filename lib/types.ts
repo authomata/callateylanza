@@ -24,6 +24,20 @@ export interface Project {
   id: string; client_id: string; nombre: string; estado: ProjectEstado;
   fecha_inicio: string; fecha_dia7: string | null;
   paleta_marca: unknown | null; notas: string | null; created_at: string;
+  netlify_site_id?: string | null; landing_url?: string | null;
+}
+
+export type AssetTipo = "foto" | "video" | "pdf" | "otro";
+export interface Asset {
+  id: string; project_id: string; deliverable_id: string | null;
+  tipo: AssetTipo; categoria: string | null; file_url: string;
+  aprobado: boolean; publicado: boolean; created_at: string;
+}
+
+export type LibrarySeccion = "onboarding" | "curso1" | "curso2" | "curso3";
+export interface LibraryItem {
+  id: string; seccion: LibrarySeccion; titulo: string;
+  embed_url: string | null; descripcion: string | null; orden: number; activo: boolean;
 }
 
 export interface InputRow {
