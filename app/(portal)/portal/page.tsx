@@ -5,6 +5,7 @@ import type { DeliverableTipo } from "@/lib/types";
 import { LibrarySection } from "@/components/library-embed";
 import { getLandingStatus } from "@/app/actions/landing";
 import { LandingCard } from "./landing-card";
+import { ContactForm } from "./contact-form";
 
 export const dynamic = "force-dynamic";
 
@@ -155,16 +156,7 @@ export default async function PortalPage() {
       <LibrarySection items={library ?? []} />
 
       {/* contacto */}
-      <section className="rounded-xl border border-[var(--border-card)] bg-subtle p-5 text-center">
-        <div className="font-serif text-lg">¿Dudas sobre tu kit?</div>
-        <p className="mt-1 text-sm text-secondary">Escríbele directo a Andrés.</p>
-        <a
-          href="mailto:andres@authomata.io"
-          className="mt-3 inline-block rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:brightness-105"
-        >
-          Contactar
-        </a>
-      </section>
+      <ContactForm projectId={project?.id ?? null} />
     </div>
   );
 }

@@ -11,13 +11,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (user.rol === "cliente") redirect("/portal");
 
   const supabase = await createClient();
-  const { data: notifs } = await supabase
-    .from("notifications")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(15);
+  const [{ data: notifs }, { count: pendientes }] = await Promise.all([
+    supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(15),
+    supabase.from("messages").select("id", { count: "exact", head: true }).eq("resuelto", false),
+  ]);
   const notifications = (notifs ?? []) as Notification[];
   const unread = notifications.filter((n) => !n.leido).length;
+  const buzonPendientes = pendientes ?? 0;
 
   return (
     <div className="flex min-h-full flex-col">
@@ -32,6 +32,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <nav className="flex items-center gap-5 text-sm">
               <Link href="/dashboard" className="text-secondary hover:text-foreground">
                 Proyectos
+              </Link>
+              <Link href="/inbox" className="flex items-center gap-1.5 text-secondary hover:text-foreground">
+                Buzón
+                {buzonPendientes > 0 && (
+                  <span className="grid h-4 min-w-4 place-items-center rounded-full bg-brand px-1 text-[10px] font-semibold text-brand-fg">
+                    {buzonPendientes}
+                  </span>
+                )}
               </Link>
               {user.rol === "admin" && (
                 <>

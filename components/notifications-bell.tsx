@@ -44,7 +44,7 @@ export function NotificationsBell({ initial, unread }: { initial: Notification[]
                 {initial.map((n) => (
                   <li key={n.id}>
                     <Link
-                      href={n.project_id ? `/projects/${n.project_id}` : "/dashboard"}
+                      href={n.tipo === "mensaje" ? "/inbox" : n.project_id ? `/projects/${n.project_id}` : "/dashboard"}
                       onClick={() => setOpen(false)}
                       className={`block rounded-lg px-2 py-2 text-xs hover:bg-[color-mix(in_srgb,var(--border)_35%,transparent)] ${
                         n.leido ? "text-muted" : "text-secondary"
