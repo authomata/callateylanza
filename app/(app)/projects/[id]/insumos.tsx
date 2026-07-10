@@ -12,6 +12,7 @@ const INPUT_LABEL: Record<string, string> = {
   conclusiones: "Conclusiones",
   foto_referencia: "Foto ref.",
   otro: "Otro",
+  aporte_cliente: "Aporte del cliente",
 };
 
 export default function InsumosPanel({
@@ -80,8 +81,16 @@ function InsumosTab({ projectId, inputs }: { projectId: string; inputs: InputRow
       </div>
 
       {viewing && (
-        <div className="max-h-[24vh] overflow-auto rounded-lg border border-[var(--border-card)] bg-surface p-2 text-xs whitespace-pre-wrap text-secondary">
-          {viewing.contenido_texto ?? "(archivo adjunto)"}
+        <div className="max-h-[24vh] space-y-1.5 overflow-auto rounded-lg border border-[var(--border-card)] bg-surface p-2 text-xs">
+          {viewing.contenido_texto && (
+            <div className="whitespace-pre-wrap text-secondary">{viewing.contenido_texto}</div>
+          )}
+          {viewing.file_url && (
+            <a href={viewing.file_url} target="_blank" className="inline-block text-brand hover:underline">
+              Abrir archivo adjunto ↗
+            </a>
+          )}
+          {!viewing.contenido_texto && !viewing.file_url && <span className="text-muted">(vacío)</span>}
         </div>
       )}
 

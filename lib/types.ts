@@ -7,7 +7,7 @@ export type DeliverableTipo = "D0" | "D1" | "D2" | "D3" | "D4" | "D5" | "D6" | "
 export type DeliverableEstado =
   | "pendiente" | "generando" | "borrador" | "en_edicion"
   | "listo_para_revision" | "aprobado" | "publicado" | "rechazado";
-export type InputTipo = "transcripcion" | "conclusiones" | "foto_referencia" | "otro";
+export type InputTipo = "transcripcion" | "conclusiones" | "foto_referencia" | "otro" | "aporte_cliente";
 export type VoiceEstado = "borrador" | "en_edicion" | "aprobado";
 export type GeneradoPor = "ia" | "humano";
 

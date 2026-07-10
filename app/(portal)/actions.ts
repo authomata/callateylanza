@@ -22,6 +22,53 @@ export async function updateMyName(nombre: string) {
   revalidatePath("/portal", "layout");
 }
 
+// El cliente aporta material (texto/link y/o archivo ya subido a storage) → queda como insumo
+// del proyecto y avisa al equipo. Alimenta la generación de D0.
+export async function addAporte(
+  projectId: string,
+  titulo: string,
+  texto: string,
+  fileUrl: string | null
+) {
+  const user = await getCurrentUser();
+  if (!user) throw new Error("No autorizado");
+  const t = titulo.trim() || "Aporte del cliente";
+  if (!texto.trim() && !fileUrl) throw new Error("Agrega un texto/link o un archivo");
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("inputs").insert({
+    project_id: projectId,
+    tipo: "aporte_cliente",
+    titulo: t,
+    contenido_texto: texto.trim() || null,
+    file_url: fileUrl,
+    subido_por: user.id,
+  });
+  if (error) throw new Error(error.message);
+
+  // Avisar al equipo (campanita + email).
+  const admin = createAdminClient();
+  await admin.from("notifications").insert([
+    { target_rol: "admin", project_id: projectId, tipo: "aporte", texto: `${user.nombre} sumó material: ${t}` },
+    { target_rol: "operador", project_id: projectId, tipo: "aporte", texto: `${user.nombre} sumó material: ${t}` },
+  ]);
+  const origin = await appOrigin();
+  const shell = {
+    titulo: `${user.nombre} sumó material`,
+    cuerpo:
+      `<p><strong>${t}</strong></p>` +
+      (texto.trim() ? `<p style="color:#5a5147">${texto.trim().slice(0, 400)}</p>` : "") +
+      (fileUrl ? `<p><a href="${fileUrl}">Ver archivo adjunto</a></p>` : ""),
+    ctaUrl: `${origin}/projects/${projectId}`,
+    ctaText: "Abrir el proyecto",
+  };
+  await notifyRole("admin", `Nuevo material de ${user.nombre}`, shell);
+  await notifyRole("operador", `Nuevo material de ${user.nombre}`, shell);
+
+  revalidatePath("/portal");
+  revalidatePath(`/projects/${projectId}`);
+}
+
 // El cliente envía un mensaje al equipo → queda con fecha/hora + avisa a admin y operador.
 export async function enviarMensaje(projectId: string, texto: string) {
   const user = await getCurrentUser();

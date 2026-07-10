@@ -6,6 +6,7 @@ import { LibrarySection } from "@/components/library-embed";
 import { getLandingStatus } from "@/app/actions/landing";
 import { LandingCard } from "./landing-card";
 import { ContactForm } from "./contact-form";
+import { AportesSection } from "./aportes";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +66,12 @@ export default async function PortalPage() {
           .order("created_at")
       : Promise.resolve({ data: [] }),
   ]);
+
+  const { data: aportes } = await supabase
+    .from("inputs")
+    .select("id, titulo, contenido_texto, file_url, created_at")
+    .eq("subido_por", user!.id)
+    .order("created_at", { ascending: false });
 
   const byTipo = new Map((pubs ?? []).map((d) => [d.tipo, d]));
   const listos = KIT.filter((k) => byTipo.has(k.tipo)).length;
@@ -158,6 +165,9 @@ export default async function PortalPage() {
           )}
         </section>
       )}
+
+      {/* aporta material */}
+      <AportesSection projectId={project?.id ?? null} aportes={(aportes ?? []) as never} />
 
       {/* biblioteca */}
       <LibrarySection items={library ?? []} />
