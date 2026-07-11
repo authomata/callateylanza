@@ -699,6 +699,13 @@ create policy "aportes staff write" on storage.objects for insert to authenticat
 drop policy if exists "aportes read" on storage.objects;
 create policy "aportes read" on storage.objects for select using (bucket_id = 'aportes');
 
+-- ─── 0011_site.sql ───
+
+-- Generador de sitio v3: el HTML de la landing se guarda aparte del copy (D5), para poder
+-- previsualizarlo y regenerarlo sin tocar el entregable. Idempotente.
+alter table projects add column if not exists landing_html   text;
+alter table projects add column if not exists landing_preset text;
+
 -- ─── seed (D0/D1) ───
 
 -- Seed: module_templates v1 (D0 + D1 active, D2–D8 inactive stubs).

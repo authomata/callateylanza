@@ -5,6 +5,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUser, isStaff } from "@/lib/auth/roles";
 import { buildLandingHtml, deployLanding } from "@/lib/netlify";
 import { extractLandingHtml } from "@/lib/landing-html";
+import { getAnthropic, MODEL } from "@/lib/anthropic";
+import { buildSitePrompt, presetByKey } from "@/lib/prompts/site-builder";
+
+// quita bloques ```html``` del copy (los de la v2) para no confundir al generador de sitio
+function soloCopy(md: string): string {
+  return md.replace(/```html\s*[\s\S]*?```/gi, "").trim();
+}
 
 // Staff, o el cliente dueño del proyecto.
 async function requireProjectAccess(projectId: string): Promise<{ staff: boolean }> {
@@ -27,7 +34,7 @@ async function loadLandingInputs(projectId: string) {
   const admin = createAdminClient();
   const { data: proj } = await admin
     .from("projects")
-    .select("id, netlify_site_id, netlify_client_site_id, netlify_token, landing_owner, clients(nombre, slug)")
+    .select("id, netlify_site_id, netlify_client_site_id, netlify_token, landing_owner, landing_html, clients(nombre, slug)")
     .eq("id", projectId)
     .single();
   if (!proj) throw new Error("Proyecto no encontrado");
@@ -43,12 +50,75 @@ async function loadLandingInputs(projectId: string) {
     throw new Error("La landing (D5) aún no tiene contenido. Genérala primero.");
   }
 
-  // La landing real viene como bloque ```html``` en D5 (prompt v2).
-  // Si no está, publicamos el copy renderizado como fallback.
-  const real = extractLandingHtml(d5.contenido_md);
-  const html = real ?? buildLandingHtml(d5.contenido_md, { titulo: client.nombre });
+  // Prioridad: el sitio generado (v3, projects.landing_html). Si no existe, cae al bloque html
+  // de D5 (v2), y como último recurso renderiza el copy.
+  const stored = (proj.landing_html as string | null)?.trim() || null;
+  const html = stored ?? extractLandingHtml(d5.contenido_md) ?? buildLandingHtml(d5.contenido_md, { titulo: client.nombre });
 
-  return { admin, proj, client, d5, html, esLandingReal: !!real };
+  return { admin, proj, client, d5, html, esSitio: !!stored };
+}
+
+// Genera el SITIO (v3) con Opus a partir del copy aprobado + dirección de arte + preset.
+export async function generarSitio(
+  projectId: string,
+  presetKey: string,
+  instrucciones?: string
+): Promise<{ ok: true }> {
+  const user = await getCurrentUser();
+  if (!isStaff(user)) throw new Error("No autorizado");
+
+  const admin = createAdminClient();
+  const { data: proj } = await admin
+    .from("projects")
+    .select("id, clients(nombre, rubro)")
+    .eq("id", projectId)
+    .single();
+  const client = (proj as unknown as { clients: { nombre: string; rubro: string | null } }).clients;
+
+  const { data: delivs } = await admin
+    .from("deliverables")
+    .select("tipo, contenido_md")
+    .eq("project_id", projectId)
+    .in("tipo", ["D1", "D5", "D6"]);
+  const byTipo = new Map((delivs ?? []).map((d) => [d.tipo, d.contenido_md as string | null]));
+  const copy = byTipo.get("D5");
+  if (!copy?.trim()) throw new Error("Genera primero el copy de D5.");
+
+  const { system, user: um } = buildSitePrompt({
+    clientName: client.nombre,
+    rubro: client.rubro,
+    copy: soloCopy(copy),
+    tonoD1: byTipo.get("D1")?.slice(0, 3500) ?? null,
+    paletaD6: byTipo.get("D6")?.slice(0, 1600) ?? null,
+    preset: presetByKey(presetKey),
+    instrucciones,
+  });
+
+  const stream = getAnthropic().messages.stream({
+    model: MODEL,
+    max_tokens: 24000,
+    system,
+    messages: [{ role: "user", content: um }],
+  });
+  const msg = await stream.finalMessage();
+  const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+  const html = extractLandingHtml(text) ?? text.trim();
+  if (!/<html[\s>]/i.test(html)) throw new Error("El modelo no devolvió un sitio válido. Reintenta.");
+
+  await admin
+    .from("projects")
+    .update({ landing_html: html, landing_preset: presetKey })
+    .eq("id", projectId);
+  revalidatePath(`/projects/${projectId}`);
+  return { ok: true };
+}
+
+// HTML del sitio para previsualizar (staff u owner).
+export async function getLandingHtml(projectId: string): Promise<string | null> {
+  await requireProjectAccess(projectId);
+  const admin = createAdminClient();
+  const { data } = await admin.from("projects").select("landing_html").eq("id", projectId).single();
+  return (data?.landing_html as string) ?? null;
 }
 
 // Estado seguro para la UI. NUNCA devuelve el token.
@@ -58,7 +128,7 @@ export async function getLandingStatus(projectId: string) {
   const [{ data }, { data: d5 }] = await Promise.all([
     admin
       .from("projects")
-      .select("landing_url, landing_owner, netlify_token, netlify_site_id, netlify_client_site_id")
+      .select("landing_url, landing_owner, netlify_token, netlify_site_id, netlify_client_site_id, landing_html, landing_preset")
       .eq("id", projectId)
       .single(),
     admin
@@ -75,8 +145,10 @@ export async function getLandingStatus(projectId: string) {
     hasClientToken: !!data?.netlify_token,
     hasStagingSite: !!data?.netlify_site_id,
     hasClientSite: !!data?.netlify_client_site_id,
-    // ¿el D5 ya trae la landing HTML lista, o solo el copy?
-    hasRealLanding: !!extractLandingHtml(d5?.contenido_md),
+    // sitio generado (v3)
+    hasSite: !!(data?.landing_html as string | null)?.trim(),
+    preset: (data?.landing_preset as string) ?? null,
+    // ¿el D5 trae al menos copy para poder generar el sitio?
     hasCopy: !!d5?.contenido_md?.trim(),
   };
 }
