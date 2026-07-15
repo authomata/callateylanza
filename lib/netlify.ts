@@ -66,6 +66,35 @@ export interface DeployResult {
   url: string;
 }
 
+// Crea (o reutiliza) un sitio Netlify vacío. El deploy real lo hará la GitHub Action del repo.
+export async function createNetlifySite(args: {
+  token: string;
+  siteId: string | null;
+  siteName: string;
+}): Promise<DeployResult> {
+  if (args.siteId) {
+    const r = await nf(args.token, `/sites/${args.siteId}`);
+    const s = await r.json();
+    return { siteId: args.siteId, url: (s.ssl_url || s.url) as string };
+  }
+  let created: Response;
+  try {
+    created = await nf(args.token, "/sites", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: args.siteName }),
+    });
+  } catch {
+    created = await nf(args.token, "/sites", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+  }
+  const s = await created.json();
+  return { siteId: s.id as string, url: (s.ssl_url || s.url) as string };
+}
+
 // Crea el site si hace falta y sube un deploy de un solo archivo (index.html)
 // usando el "file digest" de Netlify — sin necesidad de zip.
 export async function deployLanding(args: {

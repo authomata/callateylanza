@@ -2,13 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui";
-import {
-  getLandingStatus,
-  getLandingHtml,
-  generarSitio,
-  deployLandingAndres,
-  deployLandingCliente,
-} from "@/app/actions/landing";
+import { getLandingStatus, getLandingHtml, generarSitio, publicarSitioRepo } from "@/app/actions/landing";
 import { SITE_PRESETS } from "@/lib/prompts/site-builder";
 
 type Status = Awaited<ReturnType<typeof getLandingStatus>>;
@@ -19,7 +13,7 @@ export function LandingPanel({ projectId }: { projectId: string }) {
   const [html, setHtml] = useState<string | null>(null);
   const [preset, setPreset] = useState("coach");
   const [instr, setInstr] = useState("");
-  const [busy, setBusy] = useState<null | "site" | "andres" | "cliente">(null);
+  const [busy, setBusy] = useState<null | "site" | "publish">(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -57,12 +51,12 @@ export function LandingPanel({ projectId }: { projectId: string }) {
     }
   }
 
-  async function publicar(fn: typeof deployLandingAndres, tipo: "andres" | "cliente") {
-    setBusy(tipo);
+  async function publicar() {
+    setBusy("publish");
     setMsg(null);
     try {
-      const url = await fn(projectId);
-      setMsg(`Publicado: ${url}`);
+      const r = await publicarSitioRepo(projectId);
+      setMsg(`Repo listo: ${r.repoUrl} — el sitio se publica en ~1 min: ${r.url}`);
       await reload();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "No se pudo publicar");
@@ -75,19 +69,9 @@ export function LandingPanel({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-3 rounded-xl border border-[var(--border-card)] bg-surface p-4">
-      <div className="flex items-center justify-between">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-muted">Landing</span>
-        {status.landingUrl && (
-          <span className="text-[10px] text-muted">
-            En la cuenta de{" "}
-            <strong className={status.owner === "cliente" ? "text-[var(--ok)]" : "text-brand"}>
-              {status.owner === "cliente" ? "el cliente" : "Andrés"}
-            </strong>
-          </span>
-        )}
-      </div>
+      <span className="font-mono text-[10px] uppercase tracking-wider text-muted">Landing</span>
 
-      {/* Paso 0 — diseñar el sitio */}
+      {/* Diseñar el sitio */}
       <div className="rounded-lg border border-[var(--border-card)] p-3">
         <div className="text-sm font-medium">Diseñar el sitio</div>
         {!status.hasCopy ? (
@@ -115,7 +99,7 @@ export function LandingPanel({ projectId }: { projectId: string }) {
             <input
               value={instr}
               onChange={(e) => setInstr(e.target.value)}
-              placeholder="Ajustes (opcional): «hero a pantalla completa», «más oscuro», «foco en la oferta»…"
+              placeholder="Ajustes (opcional): «hero a pantalla completa», «más oscuro»…"
               className="mt-2 w-full rounded-lg border border-[var(--border-card)] bg-background px-2.5 py-1.5 text-xs outline-none focus:border-brand"
             />
           </>
@@ -149,53 +133,51 @@ export function LandingPanel({ projectId }: { projectId: string }) {
         </div>
       )}
 
-      {/* URL publicada */}
-      {status.landingUrl && (
-        <a
-          href={status.landingUrl}
-          target="_blank"
-          className="block truncate rounded-lg border border-[var(--border-card)] bg-background px-3 py-2 text-sm text-brand hover:underline"
-        >
-          {status.landingUrl} ↗
-        </a>
-      )}
-
-      {/* Paso 1 — publicar en la cuenta de Andrés */}
+      {/* Publicar como repo */}
       <div className="rounded-lg border border-[var(--border-card)] p-3">
-        <div className="text-sm font-medium">Paso 1 · Publicar ya</div>
-        <p className="mt-0.5 text-xs text-muted">A la cuenta Netlify de Andrés, para mostrarla al instante.</p>
-        <Button
-          variant="primary"
-          className="mt-2"
-          onClick={() => publicar(deployLandingAndres, "andres")}
-          disabled={busy !== null || !status.hasSite}
-        >
-          {busy === "andres" ? "Publicando…" : status.hasStagingSite ? "Re-publicar" : "Publicar ahora"}
+        <div className="text-sm font-medium">Publicar</div>
+        <p className="mt-0.5 text-xs text-muted">
+          Crea un repo privado (<span className="font-mono">authomata/callateylanza-…</span>) que se
+          deploya solo a Netlify. Editable después con Claude Code.
+        </p>
+        <Button variant="primary" className="mt-2" onClick={publicar} disabled={busy !== null || !status.hasSite}>
+          {busy === "publish"
+            ? "Publicando…"
+            : status.repoUrl
+              ? "Actualizar sitio (push al repo)"
+              : "Publicar sitio"}
         </Button>
         {!status.hasSite && <p className="mt-1 text-[10px] text-muted">Genera el sitio primero.</p>}
-      </div>
 
-      {/* Paso 2 — traspaso al cliente */}
-      <div className="rounded-lg border border-[var(--border-card)] p-3">
-        <div className="text-sm font-medium">Paso 2 · Traspasar al cliente</div>
-        {status.hasClientToken ? (
-          <>
-            <p className="mt-0.5 text-xs text-[var(--ok)]">El cliente ya conectó su Netlify.</p>
-            <Button
-              variant="secondary"
-              className="mt-2"
-              onClick={() => publicar(deployLandingCliente, "cliente")}
-              disabled={busy !== null || !status.hasSite}
-            >
-              {busy === "cliente" ? "Traspasando…" : status.hasClientSite ? "Re-deployar en su cuenta" : "Traspasar a su cuenta"}
-            </Button>
-          </>
-        ) : (
-          <p className="mt-0.5 text-xs text-muted">
-            El cliente conecta su Netlify desde su portal; ahí se habilita el traspaso.
-          </p>
+        {(status.repoUrl || status.landingUrl) && (
+          <div className="mt-2 space-y-1 text-xs">
+            {status.landingUrl && (
+              <a href={status.landingUrl} target="_blank" className="block truncate text-brand hover:underline">
+                🌐 {status.landingUrl} ↗
+              </a>
+            )}
+            {status.repoUrl && (
+              <a href={status.repoUrl} target="_blank" className="block truncate text-secondary hover:underline">
+                📦 {status.repoUrl} ↗
+              </a>
+            )}
+          </div>
         )}
       </div>
+
+      {/* Entregar al cliente */}
+      {status.repoUrl && (
+        <details className="rounded-lg border border-[var(--border-card)] p-3 text-xs">
+          <summary className="cursor-pointer font-medium">Entregar al cliente</summary>
+          <ol className="mt-2 list-decimal space-y-1 pl-4 text-secondary">
+            <li>Agrégalo como colaborador del repo (GitHub → Settings → Collaborators).</li>
+            <li>El repo trae un <span className="font-mono">CLAUDE.md</span> con su voz de marca: puede
+              editar el sitio con Claude Code/Codex sin romper el estilo.</li>
+            <li>Para llevarlo a su Netlify: el <span className="font-mono">README.md</span> tiene los pasos
+              (crear cuenta → token → reemplazar los 2 secrets del repo).</li>
+          </ol>
+        </details>
+      )}
 
       {msg && <p className="break-all text-xs text-secondary">{msg}</p>}
     </div>

@@ -706,6 +706,12 @@ create policy "aportes read" on storage.objects for select using (bucket_id = 'a
 alter table projects add column if not exists landing_html   text;
 alter table projects add column if not exists landing_preset text;
 
+-- ─── 0012_repo.sql ───
+
+-- El sitio del cliente vive como repo de GitHub (fuente de verdad, editable, entregable).
+alter table projects add column if not exists repo_url  text;
+alter table projects add column if not exists repo_name text;
+
 -- ─── seed (D0/D1) ───
 
 -- Seed: module_templates v1 (D0 + D1 active, D2–D8 inactive stubs).

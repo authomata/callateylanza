@@ -3,10 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUser, isStaff } from "@/lib/auth/roles";
-import { buildLandingHtml, deployLanding } from "@/lib/netlify";
+import { buildLandingHtml, deployLanding, createNetlifySite } from "@/lib/netlify";
 import { extractLandingHtml } from "@/lib/landing-html";
 import { getAnthropic, MODEL } from "@/lib/anthropic";
 import { buildSitePrompt, presetByKey } from "@/lib/prompts/site-builder";
+import { ensureRepo, pushFiles, setActionsSecret } from "@/lib/github";
+import { buildWorkflow, buildReadme, buildClaudeMd } from "@/lib/repo-scaffold";
+import type { VoiceDoc } from "@/lib/types";
 
 // quita bloques ```html``` del copy (los de la v2) para no confundir al generador de sitio
 function soloCopy(md: string): string {
@@ -113,6 +116,96 @@ export async function generarSitio(
   return { ok: true };
 }
 
+// Publica el sitio como repo de GitHub + GitHub Action que deploya a Netlify.
+// Fuente de verdad editable (Claude Code/Codex) y entregable al cliente.
+export async function publicarSitioRepo(projectId: string): Promise<{ repoUrl: string; url: string }> {
+  const user = await getCurrentUser();
+  if (!isStaff(user)) throw new Error("No autorizado");
+
+  const githubToken = process.env.GITHUB_TOKEN;
+  const owner = process.env.GITHUB_OWNER || "authomata";
+  const netlifyToken = process.env.NETLIFY_AUTH_TOKEN;
+  if (!githubToken) throw new Error("Falta GITHUB_TOKEN en el servidor.");
+  if (!netlifyToken) throw new Error("Falta NETLIFY_AUTH_TOKEN en el servidor.");
+
+  const admin = createAdminClient();
+  const { data: proj } = await admin
+    .from("projects")
+    .select("id, netlify_site_id, repo_name, landing_html, clients(nombre, rubro, slug)")
+    .eq("id", projectId)
+    .single();
+  if (!proj) throw new Error("Proyecto no encontrado");
+  const client = (proj as unknown as { clients: { nombre: string; rubro: string | null; slug: string } }).clients;
+  const html = (proj.landing_html as string | null)?.trim();
+  if (!html) throw new Error("Genera el sitio primero (botón «Generar sitio»).");
+
+  // contexto de marca para el CLAUDE.md
+  const { data: delivs } = await admin
+    .from("deliverables")
+    .select("tipo, contenido_md")
+    .eq("project_id", projectId)
+    .in("tipo", ["D1", "D6"]);
+  const byTipo = new Map((delivs ?? []).map((d) => [d.tipo, d.contenido_md as string | null]));
+  const { data: voice } = await admin
+    .from("voice_docs")
+    .select("*")
+    .eq("project_id", projectId)
+    .single<VoiceDoc>();
+
+  const repoName = (proj.repo_name as string) || `callateylanza-${client.slug}`;
+
+  // 1) sitio Netlify (vacío; lo deploya la Action)
+  const site = await createNetlifySite({
+    token: netlifyToken,
+    siteId: (proj.netlify_site_id as string) ?? null,
+    siteName: repoName,
+  });
+
+  // 2) repo privado
+  const repo = await ensureRepo(githubToken, owner, repoName, `Landing de ${client.nombre} — Cállate y Lanza`);
+
+  // 3) secrets de la Action (antes del push, para que el primer run los tenga)
+  await setActionsSecret(githubToken, owner, repoName, "NETLIFY_AUTH_TOKEN", netlifyToken);
+  await setActionsSecret(githubToken, owner, repoName, "NETLIFY_SITE_ID", site.siteId);
+
+  // 4) archivos del repo (push en un commit → dispara el deploy)
+  await pushFiles(githubToken, owner, repoName, repo.default_branch, [
+    { path: "index.html", content: html },
+    { path: "README.md", content: buildReadme(client.nombre, site.url) },
+    {
+      path: "CLAUDE.md",
+      content: buildClaudeMd({
+        clientName: client.nombre,
+        rubro: client.rubro,
+        paleta: byTipo.get("D6")?.slice(0, 1500) ?? null,
+        arquetipo: byTipo.get("D1")?.slice(0, 2500) ?? null,
+        voice: voice ?? null,
+      }),
+    },
+    { path: ".github/workflows/deploy.yml", content: buildWorkflow() },
+  ], "Actualiza el sitio");
+
+  await admin
+    .from("projects")
+    .update({
+      repo_url: repo.html_url,
+      repo_name: repoName,
+      netlify_site_id: site.siteId,
+      landing_url: site.url,
+      landing_owner: "andres",
+    })
+    .eq("id", projectId);
+
+  await admin.from("activity_log").insert({
+    project_id: projectId,
+    user_id: user!.id,
+    accion: "sitio_publicado_repo",
+    detalle: repo.full_name,
+  });
+  revalidatePath(`/projects/${projectId}`);
+  return { repoUrl: repo.html_url, url: site.url };
+}
+
 // HTML del sitio para previsualizar (staff u owner).
 export async function getLandingHtml(projectId: string): Promise<string | null> {
   await requireProjectAccess(projectId);
@@ -128,7 +221,7 @@ export async function getLandingStatus(projectId: string) {
   const [{ data }, { data: d5 }] = await Promise.all([
     admin
       .from("projects")
-      .select("landing_url, landing_owner, netlify_token, netlify_site_id, netlify_client_site_id, landing_html, landing_preset")
+      .select("landing_url, landing_owner, netlify_token, netlify_site_id, netlify_client_site_id, landing_html, landing_preset, repo_url")
       .eq("id", projectId)
       .single(),
     admin
@@ -148,6 +241,7 @@ export async function getLandingStatus(projectId: string) {
     // sitio generado (v3)
     hasSite: !!(data?.landing_html as string | null)?.trim(),
     preset: (data?.landing_preset as string) ?? null,
+    repoUrl: (data?.repo_url as string) ?? null,
     // ¿el D5 trae al menos copy para poder generar el sitio?
     hasCopy: !!d5?.contenido_md?.trim(),
   };
