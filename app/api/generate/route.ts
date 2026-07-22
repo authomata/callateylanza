@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!isStaff(user)) return jsonError(401, "No autorizado");
 
-  const { deliverableId, instrucciones } = await req.json();
+  const { deliverableId, instrucciones, modo, baseContent } = await req.json();
   if (!deliverableId) return jsonError(400, "Falta deliverableId");
 
   const supabase = await createClient();
@@ -80,6 +80,8 @@ export async function POST(req: NextRequest) {
     priorDeliverables,
     inputs,
     instrucciones,
+    modo: modo === "ajustar" ? "ajustar" : "nuevo",
+    baseContent: typeof baseContent === "string" ? baseContent : null,
   });
 
   await supabase.from("deliverables").update({ estado: "generando" }).eq("id", deliverableId);

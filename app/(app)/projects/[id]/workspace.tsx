@@ -115,8 +115,9 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
     }
   }
 
-  async function generate() {
+  async function generate(modo: "nuevo" | "ajustar" = "nuevo") {
     if (!selected) return;
+    const base = buffer; // documento actual (con ediciones a mano) para modo ajustar
     setGenerating(true);
     setTab("editar");
     setBuffer("");
@@ -125,7 +126,12 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ deliverableId: selId, instrucciones }),
+        body: JSON.stringify({
+          deliverableId: selId,
+          instrucciones,
+          modo,
+          baseContent: modo === "ajustar" ? base : undefined,
+        }),
       });
       if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({ error: "Error de generación" }));
@@ -423,7 +429,7 @@ function GateOrControls({
   busy: string | null;
   instrucciones: string;
   setInstrucciones: (v: string) => void;
-  onGenerate: () => void;
+  onGenerate: (modo: "nuevo" | "ajustar") => void;
   onUnlock: () => void;
 }) {
   if (!disponible) {
@@ -450,15 +456,34 @@ function GateOrControls({
       <textarea
         value={instrucciones}
         onChange={(e) => setInstrucciones(e.target.value)}
-        placeholder="Instrucciones adicionales (opcional): «hazlo más filoso», «usa la historia del avión»…"
+        placeholder={
+          isRegen
+            ? "Qué ajustar: «afila la síntesis», «suma la historia del avión al pilar 2», «acorta el manifiesto»…"
+            : "Instrucciones adicionales (opcional): «hazlo más filoso», «usa la historia del avión»…"
+        }
         className="mb-2.5 h-14 w-full resize-none rounded-lg border border-[var(--border-card)] bg-background p-2.5 font-serif text-[15px] italic text-secondary outline-none placeholder:text-muted focus:border-brand"
       />
-      <div className="flex items-center gap-3">
-        <Button variant="primary" onClick={onGenerate} disabled={generating}>
-          {generating ? "Generando…" : isRegen ? "↻ Regenerar" : "Generar"}
+      {isRegen ? (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="primary" onClick={() => onGenerate("ajustar")} disabled={generating}>
+              {generating ? "Trabajando…" : "Ajustar"}
+            </Button>
+            <Button variant="ghost" onClick={() => onGenerate("nuevo")} disabled={generating}>
+              Regenerar desde cero
+            </Button>
+            <span className="ml-auto text-xs text-muted">v{selected.version_actual}</span>
+          </div>
+          <p className="mt-1.5 text-[10px] text-muted">
+            <strong>Ajustar</strong> conserva el documento actual (con tus ediciones) y aplica tus cambios.{" "}
+            <strong>Regenerar</strong> lo rehace de cero.
+          </p>
+        </>
+      ) : (
+        <Button variant="primary" onClick={() => onGenerate("nuevo")} disabled={generating}>
+          {generating ? "Generando…" : "Generar"}
         </Button>
-        {isRegen && <span className="text-xs text-muted">v{selected.version_actual} · última generación guardada</span>}
-      </div>
+      )}
     </div>
   );
 }

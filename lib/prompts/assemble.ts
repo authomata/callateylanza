@@ -8,6 +8,8 @@ export interface AssembleArgs {
   inputs?: InputRow[]; // raw insumos — used by D0
   d0Content?: string | null; // D0 materia prima — used by D1+
   instrucciones?: string | null; // operator's free-text extra instructions
+  modo?: "nuevo" | "ajustar"; // ajustar = evoluciona el documento actual
+  baseContent?: string | null; // documento actual (para modo ajustar)
 }
 
 // Only the fields we want to expose to the model (keeps ids/timestamps out of the prompt).
@@ -22,6 +24,23 @@ function voiceForPrompt(v: VoiceDoc) {
 
 // Assembles the { system, user } pair for an Anthropic call (spec §7).
 export function assembleGeneration(a: AssembleArgs): { system: string; user: string } {
+  // MODO AJUSTE: evoluciona el documento actual en vez de rehacerlo.
+  if (a.modo === "ajustar" && a.baseContent?.trim()) {
+    const system =
+      `${a.template.prompt_sistema}\n\n---\n${GLOBAL_RULES}\n\n---\n` +
+      `MODO AJUSTE (importante): NO rehagas el documento desde cero. Parte del DOCUMENTO ACTUAL de abajo y aplica ÚNICAMENTE los ajustes pedidos. Conserva su estructura, sus secciones, sus ejemplos, sus citas y todo lo que ya funciona; cambia solo lo necesario. Devuelve el documento COMPLETO ya ajustado (no un fragmento ni un resumen de cambios).`;
+    const parts: string[] = [`# DOCUMENTO ACTUAL (ajústalo, no lo rehagas)\n${a.baseContent}`];
+    if (a.instrucciones?.trim()) parts.push(`# AJUSTES PEDIDOS\n${a.instrucciones.trim()}`);
+    if (a.voiceDoc) {
+      parts.push(
+        "# DOCUMENTO DE VOZ (mantén esta voz al ajustar)\n```json\n" +
+          JSON.stringify(voiceForPrompt(a.voiceDoc), null, 2) +
+          "\n```"
+      );
+    }
+    return { system, user: parts.join("\n\n") };
+  }
+
   const system =
     `${a.template.prompt_sistema}\n\n---\n${GLOBAL_RULES}` +
     (a.template.estructura_output
