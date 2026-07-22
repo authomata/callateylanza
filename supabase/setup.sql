@@ -712,6 +712,15 @@ alter table projects add column if not exists landing_preset text;
 alter table projects add column if not exists repo_url  text;
 alter table projects add column if not exists repo_name text;
 
+-- ─── 0013_photos.sql ───
+
+-- Sesión de fotos IA (D6): los assets pueden estar en generación asíncrona.
+alter table assets add column if not exists estado            text not null default 'listo';
+alter table assets add column if not exists muapi_request_id  text;
+alter table assets add column if not exists prompt            text;
+-- mientras se genera, todavía no hay archivo
+alter table assets alter column file_url drop not null;
+
 -- ─── seed (D0/D1) ───
 
 -- Seed: module_templates v1 (D0 + D1 active, D2–D8 inactive stubs).

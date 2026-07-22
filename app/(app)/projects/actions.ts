@@ -8,6 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUser, isStaff, isAdmin } from "@/lib/auth/roles";
 import { extractVoiceFromMarkdown } from "@/lib/voice-extract";
 import { notifyEmail, notifyRole, appOrigin } from "@/lib/email";
+import { submitEdit, pollResult } from "@/lib/muapi";
 import type { DeliverableTipo, GeneradoPor } from "@/lib/types";
 
 const DELIVERABLE_NAMES: Record<DeliverableTipo, string> = {
@@ -338,10 +339,117 @@ export async function getAssets(deliverableId: string) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("assets")
-    .select("id, tipo, categoria, file_url, aprobado, publicado")
+    .select("id, tipo, categoria, file_url, aprobado, publicado, estado, prompt")
     .eq("deliverable_id", deliverableId)
     .order("created_at");
   return data ?? [];
+}
+
+// ── Sesión de fotos IA (D6) ──────────────────────────────────────────────────
+export async function registrarFotoRef(projectId: string, fileUrl: string, titulo: string) {
+  const user = await getCurrentUser();
+  if (!isStaff(user)) throw new Error("No autorizado");
+  const supabase = await createClient();
+  const { error } = await supabase.from("inputs").insert({
+    project_id: projectId,
+    tipo: "foto_referencia",
+    titulo: titulo || "Foto de referencia",
+    file_url: fileUrl,
+    subido_por: user!.id,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/projects/${projectId}`);
+}
+
+export async function getFotosRef(projectId: string) {
+  const user = await getCurrentUser();
+  if (!isStaff(user)) return [];
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("inputs")
+    .select("id, titulo, file_url")
+    .eq("project_id", projectId)
+    .eq("tipo", "foto_referencia")
+    .order("created_at", { ascending: false });
+  return data ?? [];
+}
+
+// Envía la generación y crea el asset en estado 'generando' con el request_id.
+export async function generarFoto(args: {
+  projectId: string;
+  deliverableId: string;
+  refUrl: string;
+  prompt: string;
+  aspect: string;
+  resolution: string;
+  categoria: string;
+}): Promise<{ assetId: string }> {
+  const user = await getCurrentUser();
+  if (!isStaff(user)) throw new Error("No autorizado");
+  if (!args.refUrl) throw new Error("Elige una foto de referencia");
+  if (!args.prompt.trim()) throw new Error("Escribe un prompt");
+
+  const requestId = await submitEdit({
+    refUrls: [args.refUrl],
+    prompt: args.prompt,
+    aspect: args.aspect,
+    resolution: args.resolution,
+  });
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("assets")
+    .insert({
+      project_id: args.projectId,
+      deliverable_id: args.deliverableId,
+      tipo: "foto",
+      categoria: args.categoria || null,
+      prompt: args.prompt,
+      muapi_request_id: requestId,
+      estado: "generando",
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  return { assetId: data.id };
+}
+
+// Consulta el estado; si terminó, re-hospeda la imagen en Storage y actualiza el asset.
+export async function pollFoto(assetId: string): Promise<{ estado: string; fileUrl: string | null }> {
+  const user = await getCurrentUser();
+  if (!isStaff(user)) throw new Error("No autorizado");
+  const supabase = await createClient();
+  const { data: a } = await supabase
+    .from("assets")
+    .select("muapi_request_id, estado, file_url, project_id")
+    .eq("id", assetId)
+    .single();
+  if (!a) throw new Error("Asset no encontrado");
+  if (a.estado === "listo") return { estado: "listo", fileUrl: a.file_url as string };
+  if (!a.muapi_request_id) return { estado: a.estado as string, fileUrl: null };
+
+  const { status, url } = await pollResult(a.muapi_request_id as string);
+
+  if (url) {
+    // re-hospedar en nuestro Storage (la URL de MuAPI es efímera)
+    const admin = createAdminClient();
+    const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
+    const path = `${a.project_id}/gen/${crypto.randomUUID()}.jpg`;
+    const { error: upErr } = await admin.storage.from("assets").upload(path, bytes, {
+      contentType: "image/jpeg",
+      upsert: true,
+    });
+    if (upErr) throw new Error(`Storage: ${upErr.message}`);
+    const fileUrl = admin.storage.from("assets").getPublicUrl(path).data.publicUrl;
+    await supabase.from("assets").update({ file_url: fileUrl, estado: "listo" }).eq("id", assetId);
+    return { estado: "listo", fileUrl };
+  }
+
+  if (status === "failed" || status === "error") {
+    await supabase.from("assets").update({ estado: "error" }).eq("id", assetId);
+    return { estado: "error", fileUrl: null };
+  }
+  return { estado: "generando", fileUrl: null };
 }
 
 export async function setAssetFlags(assetId: string, patch: { aprobado?: boolean; publicado?: boolean }) {
