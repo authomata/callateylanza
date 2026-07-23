@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser, isAdmin } from "@/lib/auth/roles";
 import type { ModuleTemplate } from "@/lib/types";
 import TemplateEditor from "./editor";
+import { HouseVoiceEditor } from "./house-voice-editor";
+import { HOUSE_VOICE_DEFAULT } from "@/lib/prompts/house-voice";
 
 export const dynamic = "force-dynamic";
 
@@ -11,11 +13,10 @@ export default async function TemplatesPage() {
   if (!isAdmin(user)) redirect("/dashboard");
 
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("module_templates")
-    .select("*")
-    .order("tipo")
-    .order("version", { ascending: false });
+  const [{ data }, { data: hv }] = await Promise.all([
+    supabase.from("module_templates").select("*").order("tipo").order("version", { ascending: false }),
+    supabase.from("app_settings").select("value").eq("key", "house_voice").maybeSingle(),
+  ]);
 
   const templates = (data ?? []) as ModuleTemplate[];
   const byTipo = new Map<string, ModuleTemplate[]>();
@@ -33,6 +34,8 @@ export default async function TemplatesPage() {
           guardar como nueva versión.
         </p>
       </div>
+      <HouseVoiceEditor value={(hv?.value as string) ?? HOUSE_VOICE_DEFAULT} />
+
       <div className="space-y-3">
         {[...byTipo.entries()].map(([tipo, versions]) => (
           <TemplateEditor key={tipo} tipo={tipo} versions={versions} />

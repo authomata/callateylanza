@@ -10,6 +10,13 @@ export interface AssembleArgs {
   instrucciones?: string | null; // operator's free-text extra instructions
   modo?: "nuevo" | "ajustar"; // ajustar = evoluciona el documento actual
   baseContent?: string | null; // documento actual (para modo ajustar)
+  houseVoice?: string | null; // registro de la casa (cómo se escribe)
+}
+
+// El registro de la casa va SIEMPRE en el system, junto a las reglas globales.
+function systemBase(a: AssembleArgs): string {
+  return `${a.template.prompt_sistema}\n\n---\n${GLOBAL_RULES}` +
+    (a.houseVoice?.trim() ? `\n\n---\n${a.houseVoice.trim()}` : "");
 }
 
 // Only the fields we want to expose to the model (keeps ids/timestamps out of the prompt).
@@ -27,7 +34,7 @@ export function assembleGeneration(a: AssembleArgs): { system: string; user: str
   // MODO AJUSTE: evoluciona el documento actual en vez de rehacerlo.
   if (a.modo === "ajustar" && a.baseContent?.trim()) {
     const system =
-      `${a.template.prompt_sistema}\n\n---\n${GLOBAL_RULES}\n\n---\n` +
+      `${systemBase(a)}\n\n---\n` +
       `MODO AJUSTE (importante): NO rehagas el documento desde cero. Parte del DOCUMENTO ACTUAL de abajo y aplica ÚNICAMENTE los ajustes pedidos. Conserva su estructura, sus secciones, sus ejemplos, sus citas y todo lo que ya funciona; cambia solo lo necesario. Devuelve el documento COMPLETO ya ajustado (no un fragmento ni un resumen de cambios).`;
     const parts: string[] = [`# DOCUMENTO ACTUAL (ajústalo, no lo rehagas)\n${a.baseContent}`];
     if (a.instrucciones?.trim()) parts.push(`# AJUSTES PEDIDOS\n${a.instrucciones.trim()}`);
@@ -42,7 +49,7 @@ export function assembleGeneration(a: AssembleArgs): { system: string; user: str
   }
 
   const system =
-    `${a.template.prompt_sistema}\n\n---\n${GLOBAL_RULES}` +
+    systemBase(a) +
     (a.template.estructura_output
       ? `\n\n---\nESTRUCTURA ESPERADA DEL OUTPUT:\n${a.template.estructura_output}`
       : "");

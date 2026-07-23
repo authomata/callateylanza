@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser, isStaff, jsonError } from "@/lib/auth/roles";
 import { createGenerationStream } from "@/lib/anthropic";
 import { assembleGeneration } from "@/lib/prompts/assemble";
+import { HOUSE_VOICE_DEFAULT } from "@/lib/prompts/house-voice";
 import { computeAvailability } from "@/lib/pipeline";
 import { extractVoiceFromMarkdown } from "@/lib/voice-extract";
 import type { Deliverable, InputRow, ModuleTemplate, VoiceDoc } from "@/lib/types";
@@ -74,6 +75,13 @@ export async function POST(req: NextRequest) {
     inputs = (ins ?? []) as InputRow[];
   }
 
+  // Registro de la casa (editable en /templates, sin deploy)
+  const { data: hv } = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "house_voice")
+    .maybeSingle();
+
   const { system, user: userMsg } = assembleGeneration({
     template,
     voiceDoc: deliverable.tipo === "D0" ? null : voice,
@@ -82,6 +90,7 @@ export async function POST(req: NextRequest) {
     instrucciones,
     modo: modo === "ajustar" ? "ajustar" : "nuevo",
     baseContent: typeof baseContent === "string" ? baseContent : null,
+    houseVoice: (hv?.value as string) ?? HOUSE_VOICE_DEFAULT,
   });
 
   await supabase.from("deliverables").update({ estado: "generando" }).eq("id", deliverableId);

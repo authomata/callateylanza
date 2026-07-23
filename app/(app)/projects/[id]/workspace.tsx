@@ -82,7 +82,11 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
   const template = templates.find((t) => t.tipo === selected?.tipo);
   const report = useMemo(() => runValidators(selected?.tipo ?? "D1", buffer), [buffer, selected?.tipo]);
   const voseo = report.voseo;
-  const cleanForListo = voseo.length === 0 && (!report.length || report.length.ok) && (!report.anchors || report.anchors.ok);
+  const cleanForListo =
+    voseo.length === 0 &&
+    report.slop.length === 0 &&
+    (!report.length || report.length.ok) &&
+    (!report.anchors || report.anchors.ok);
 
   const patchItem = useCallback((id: string, patch: Partial<Deliverable>) => {
     setItems((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
@@ -330,6 +334,16 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
 
             {/* validadores */}
             <VoseoPanel findings={voseo} onFixAll={applyAutocorrect} />
+            <SlopPanel
+              findings={report.slop}
+              onLimpiar={() => {
+                setInstrucciones(
+                  "Limpia el andamiaje retórico: elimina metadiscurso, etiquetas como «REGLA DE ORO»/«Nota», muletillas de IA, falsas dicotomías («no se trata de X sino Y») y cierres inspiracionales. No cambies el contenido ni la estructura; solo el fraseo."
+                );
+                generate("ajustar");
+              }}
+              disabled={generating || busy !== null}
+            />
             {report.anchors && <ValidatorLine ok={report.anchors.ok} text={report.anchors.message} />}
             {report.length && (
               <ValidatorLine
@@ -536,6 +550,44 @@ function VoseoPanel({ findings, onFixAll }: { findings: { line: number; match: s
           <li key={i}>
             línea {f.line}: <span className="font-mono text-[var(--danger)]">{f.match}</span> →{" "}
             <span className="font-mono">{f.suggestion}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function SlopPanel({
+  findings,
+  onLimpiar,
+  disabled,
+}: {
+  findings: { line: number; match: string; motivo: string }[];
+  onLimpiar: () => void;
+  disabled: boolean;
+}) {
+  if (findings.length === 0) {
+    return (
+      <div className="rounded-lg border border-[var(--border-card)] bg-surface px-3 py-2 text-xs text-[var(--ok)]">
+        ✓ Sin andamiaje retórico ni muletillas de IA.
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_6%,transparent)] p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-sm font-medium text-[var(--danger)]">
+          {findings.length} frase(s) de andamiaje / slop
+        </span>
+        <Button variant="danger" onClick={onLimpiar} disabled={disabled}>
+          Limpiar retórica
+        </Button>
+      </div>
+      <ul className="max-h-24 space-y-0.5 overflow-auto text-xs text-muted">
+        {findings.slice(0, 20).map((f, i) => (
+          <li key={i}>
+            línea {f.line}: <span className="font-mono text-[var(--danger)]">{f.match}</span>{" "}
+            <span className="opacity-70">— {f.motivo}</span>
           </li>
         ))}
       </ul>

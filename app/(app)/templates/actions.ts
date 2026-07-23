@@ -63,6 +63,18 @@ export async function saveAsNewVersion(formData: FormData) {
   revalidatePath("/templates");
 }
 
+// Registro de la casa (cómo se escribe). Prompts-as-data: editable sin deploy.
+export async function saveHouseVoice(value: string) {
+  const user = await getCurrentUser();
+  if (!isAdmin(user)) throw new Error("Solo un admin");
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("app_settings")
+    .upsert({ key: "house_voice", value, updated_at: new Date().toISOString() }, { onConflict: "key" });
+  if (error) throw new Error(error.message);
+  revalidatePath("/templates");
+}
+
 export async function activateVersion(id: string, tipo: DeliverableTipo) {
   const user = await getCurrentUser();
   if (!isAdmin(user)) throw new Error("Solo un admin");
