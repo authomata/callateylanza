@@ -393,7 +393,12 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
             )}
 
             {(selected.tipo === "D6" || selected.tipo === "D8") && (
-              <AssetManager projectId={projectId} deliverableId={selId} tipo={selected.tipo} />
+              <AssetManager
+                projectId={projectId}
+                deliverableId={selId}
+                tipo={selected.tipo}
+                contenidoMd={buffer}
+              />
             )}
 
             {selected.tipo === "D5" && <LandingPanel projectId={projectId} />}

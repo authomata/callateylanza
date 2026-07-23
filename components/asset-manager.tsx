@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui";
 import {
@@ -13,6 +13,7 @@ import {
   registrarFotoRef,
   getFotosRef,
 } from "@/app/(app)/projects/actions";
+import { extractVisualPrompts, aspectFor, type VisualPrompt } from "@/lib/visual-prompts";
 
 type Asset = {
   id: string;
@@ -29,11 +30,6 @@ type RefFoto = { id: string; titulo: string; file_url: string };
 const IDENTITY =
   "preserving his/her exact facial features, expression, skin tone and identity, do not alter features. natural skin texture, no beauty filter, no plastic smoothing.";
 
-const QUICK = [
-  { key: "autoridad", label: "Autoridad", aspect: "4:5", prompt: "Editorial authority portrait for a personal brand website, seated confidently, warm cinematic studio lighting, refined dark outfit, deep solid backdrop in the brand colors, shallow depth of field, magazine quality." },
-  { key: "cercano", label: "Cercano", aspect: "4:5", prompt: "Warm approachable lifestyle portrait, soft natural window light, relaxed genuine expression, clean neutral background, candid personal-brand feel." },
-  { key: "contenido", label: "Contenido / redes", aspect: "9:16", prompt: "Dynamic content-creator shot for social media, vertical framing, modern clean background, confident energetic pose, crisp lighting." },
-];
 const ASPECTS = ["4:5", "3:4", "1:1", "9:16", "16:9", "3:2"];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -42,10 +38,12 @@ export function AssetManager({
   projectId,
   deliverableId,
   tipo,
+  contenidoMd,
 }: {
   projectId: string;
   deliverableId: string;
   tipo: "D6" | "D8";
+  contenidoMd?: string | null; // documento de D6, de donde salen los 15 prompts
 }) {
   const assetTipo = tipo === "D6" ? "foto" : "video";
   const accept = tipo === "D6" ? "image/*" : "video/*";
@@ -103,7 +101,12 @@ export function AssetManager({
   return (
     <div className="space-y-3">
       {tipo === "D6" && (
-        <PhotoStudio projectId={projectId} deliverableId={deliverableId} onDone={reload} />
+        <PhotoStudio
+          projectId={projectId}
+          deliverableId={deliverableId}
+          contenidoMd={contenidoMd}
+          onDone={reload}
+        />
       )}
 
       <div className="rounded-xl border border-[var(--border-card)] bg-surface p-3">
@@ -168,18 +171,24 @@ export function AssetManager({
 function PhotoStudio({
   projectId,
   deliverableId,
+  contenidoMd,
   onDone,
 }: {
   projectId: string;
   deliverableId: string;
+  contenidoMd?: string | null;
   onDone: () => void;
 }) {
   const supabase = createClient();
+  // Los 15 prompts del Banco Visual (D6), tal como se generaron para este cliente.
+  const prompts: VisualPrompt[] = useMemo(() => extractVisualPrompts(contenidoMd), [contenidoMd]);
+
   const [refs, setRefs] = useState<RefFoto[]>([]);
   const [selRef, setSelRef] = useState<string>("");
-  const [prompt, setPrompt] = useState(QUICK[0].prompt);
-  const [categoria, setCategoria] = useState("Autoridad");
-  const [aspect, setAspect] = useState("4:5");
+  const [selPromptId, setSelPromptId] = useState<string>(() => prompts[0]?.id ?? "");
+  const [prompt, setPrompt] = useState(() => prompts[0]?.prompt ?? "");
+  const [categoria, setCategoria] = useState(() => prompts[0]?.nombre ?? "");
+  const [aspect, setAspect] = useState(() => (prompts[0] ? aspectFor(prompts[0].categoria) : "4:5"));
   const [resolution, setResolution] = useState("2k");
   const [uploadingRef, setUploadingRef] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -220,10 +229,13 @@ function PhotoStudio({
     }
   }
 
-  function quick(q: (typeof QUICK)[number]) {
-    setPrompt(q.prompt);
-    setAspect(q.aspect);
-    setCategoria(q.label);
+  function elegirPrompt(id: string) {
+    const p = prompts.find((x) => x.id === id);
+    if (!p) return;
+    setSelPromptId(id);
+    setPrompt(p.prompt);
+    setAspect(aspectFor(p.categoria));
+    setCategoria(p.nombre);
   }
 
   async function generar() {
@@ -286,24 +298,48 @@ function PhotoStudio({
         <span className="text-[10px] text-muted">Foto(s) de referencia del cliente</span>
       </div>
 
-      {/* prompt + quick-start */}
-      <div className="mt-2 flex flex-wrap gap-1">
-        {QUICK.map((q) => (
-          <button
-            key={q.key}
-            onClick={() => quick(q)}
-            className="rounded-full border border-[var(--border-card)] px-2 py-0.5 text-[10px] hover:bg-subtle"
+      {/* los 15 prompts del Banco Visual */}
+      {prompts.length > 0 ? (
+        <div className="mt-3">
+          <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-muted">
+            Prompt del Banco Visual ({prompts.length})
+          </label>
+          <select
+            value={selPromptId}
+            onChange={(e) => elegirPrompt(e.target.value)}
+            className="w-full rounded-lg border border-[var(--border-card)] bg-background px-2 py-1.5 text-xs"
           >
-            {q.label}
-          </button>
-        ))}
-      </div>
+            {Object.entries(
+              prompts.reduce<Record<string, VisualPrompt[]>>((acc, p) => {
+                const k = p.categoria || "Prompts";
+                (acc[k] ||= []).push(p);
+                return acc;
+              }, {})
+            ).map(([cat, list]) => (
+              <optgroup key={cat} label={cat}>
+                {list.map((p) => (
+                  <option key={p.id} value={p.id}>{p.nombre}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </div>
+      ) : (
+        <p className="mt-3 rounded-lg border border-dashed border-[var(--border-card)] bg-subtle p-2 text-[10px] text-muted">
+          Genera el <strong>Banco Visual (D6)</strong> arriba y aquí aparecerán sus 15 prompts para elegir.
+          Mientras tanto, puedes escribir uno a mano.
+        </p>
+      )}
+
       <textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
-        className="mt-1.5 h-16 w-full resize-y rounded-lg border border-[var(--border-card)] bg-background p-2 text-xs outline-none focus:border-brand"
+        placeholder="Prompt en inglés técnico para la imagen…"
+        className="mt-1.5 h-24 w-full resize-y rounded-lg border border-[var(--border-card)] bg-background p-2 font-mono text-[11px] leading-relaxed outline-none focus:border-brand"
       />
-      <p className="mt-1 text-[10px] text-muted">Se agrega automáticamente la cláusula de preservación de identidad.</p>
+      <p className="mt-1 text-[10px] text-muted">
+        Puedes editarlo. Se agrega automáticamente la cláusula de preservación de identidad.
+      </p>
 
       {/* opciones + generar */}
       <div className="mt-2 flex flex-wrap items-center gap-2">
