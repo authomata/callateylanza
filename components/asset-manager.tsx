@@ -87,15 +87,52 @@ export function AssetManager({
     }
   }
 
-  async function toggle(a: Asset, field: "aprobado" | "publicado") {
-    await setAssetFlags(a.id, { [field]: !a[field] });
-    reload();
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Un solo botón que avanza el estado: Aprobar → Publicar → Quitar del portal.
+  async function advance(a: Asset) {
+    setBusyId(a.id);
+    try {
+      if (!a.aprobado) await setAssetFlags(a.id, { aprobado: true });
+      else if (!a.publicado) await setAssetFlags(a.id, { publicado: true });
+      else await setAssetFlags(a.id, { publicado: false });
+      await reload();
+    } finally {
+      setBusyId(null);
+    }
   }
+
+  const porPublicar = assets.filter((a) => a.aprobado && !a.publicado);
+  const [bulking, setBulking] = useState(false);
+  async function publicarTodas() {
+    setBulking(true);
+    try {
+      for (const a of porPublicar) await setAssetFlags(a.id, { publicado: true });
+      await reload();
+    } finally {
+      setBulking(false);
+    }
+  }
+
   async function remove(a: Asset) {
     if (confirm("¿Eliminar este archivo?")) {
       await deleteAsset(a.id);
       reload();
     }
+  }
+
+  function chip(a: Asset): { label: string; color: string } {
+    if (a.estado === "generando") return { label: "Generando…", color: "#8c837a" };
+    if (a.estado === "error") return { label: "Falló", color: "#a6321f" };
+    if (a.publicado) return { label: "Publicada", color: "#bc5b34" };
+    if (a.aprobado) return { label: "Aprobada", color: "#2e5e4e" };
+    return { label: "Borrador", color: "#8c837a" };
+  }
+
+  function nextLabel(a: Asset): string {
+    if (!a.aprobado) return "Aprobar";
+    if (!a.publicado) return "Publicar al portal";
+    return "Quitar del portal";
   }
 
   return (
@@ -110,15 +147,29 @@ export function AssetManager({
       )}
 
       <div className="rounded-xl border border-[var(--border-card)] bg-surface p-3">
-        <div className="mb-2 flex items-center justify-between">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <span className="font-mono text-[10px] uppercase tracking-wider text-muted">
             {tipo === "D6" ? "Galería de fotos" : "Videos"} ({assets.length})
           </span>
-          <label className="cursor-pointer rounded-lg border border-[var(--border-card)] px-3 py-1 text-xs hover:bg-[color-mix(in_srgb,var(--border)_40%,transparent)]">
-            {uploading ? "Subiendo…" : `+ Subir ${tipo === "D6" ? "fotos" : "videos"}`}
-            <input type="file" accept={accept} multiple hidden onChange={onFile} disabled={uploading} />
-          </label>
+          <div className="flex items-center gap-2">
+            {porPublicar.length > 0 && (
+              <button
+                onClick={publicarTodas}
+                disabled={bulking}
+                className="rounded-lg bg-brand px-3 py-1 text-xs font-medium text-brand-fg hover:brightness-105 disabled:opacity-50"
+              >
+                {bulking ? "Publicando…" : `Publicar ${porPublicar.length} aprobada(s)`}
+              </button>
+            )}
+            <label className="cursor-pointer rounded-lg border border-[var(--border-card)] px-3 py-1 text-xs hover:bg-[color-mix(in_srgb,var(--border)_40%,transparent)]">
+              {uploading ? "Subiendo…" : `+ Subir ${tipo === "D6" ? "fotos" : "videos"}`}
+              <input type="file" accept={accept} multiple hidden onChange={onFile} disabled={uploading} />
+            </label>
+          </div>
         </div>
+        <p className="mb-2 text-[10px] text-muted">
+          El cliente solo ve las <strong>publicadas</strong>. Flujo: Aprobar → Publicar al portal.
+        </p>
 
         {assets.length === 0 ? (
           <p className="py-3 text-center text-xs text-muted">
@@ -126,41 +177,59 @@ export function AssetManager({
           </p>
         ) : (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {assets.map((a) => (
-              <div key={a.id} className="overflow-hidden rounded-lg border border-[var(--border-card)]">
-                {a.estado === "generando" ? (
-                  <div className="grid aspect-square w-full animate-pulse place-items-center bg-subtle text-[10px] text-muted">
-                    generando…
+            {assets.map((a) => {
+              const c = chip(a);
+              const listo = a.estado === "listo" && !!a.file_url;
+              return (
+                <div key={a.id} className="overflow-hidden rounded-lg border border-[var(--border-card)] bg-background">
+                  <div className="relative">
+                    {a.estado === "generando" ? (
+                      <div className="grid aspect-square w-full animate-pulse place-items-center bg-subtle text-[10px] text-muted">
+                        generando…
+                      </div>
+                    ) : !listo ? (
+                      <div className="grid aspect-square w-full place-items-center bg-[color-mix(in_srgb,var(--danger)_8%,transparent)] text-[10px] text-[var(--danger)]">
+                        falló
+                      </div>
+                    ) : a.tipo === "foto" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={a.file_url!} alt="asset" className="aspect-square w-full object-cover" />
+                    ) : (
+                      <video src={a.file_url!} className="aspect-square w-full object-cover" />
+                    )}
+                    <span
+                      className="absolute left-1.5 top-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold backdrop-blur"
+                      style={{ color: "#fff", backgroundColor: c.color }}
+                    >
+                      {c.label}
+                    </span>
                   </div>
-                ) : a.estado === "error" || !a.file_url ? (
-                  <div className="grid aspect-square w-full place-items-center bg-[color-mix(in_srgb,var(--danger)_8%,transparent)] text-[10px] text-[var(--danger)]">
-                    falló
+
+                  <div className="flex items-center gap-1 p-1.5">
+                    <button
+                      onClick={() => advance(a)}
+                      disabled={!listo || busyId === a.id}
+                      className={`flex-1 rounded-md border px-2 py-1.5 text-[11px] font-medium transition disabled:opacity-40 ${
+                        a.publicado
+                          ? "border-[var(--border-card)] text-muted hover:text-foreground"
+                          : a.aprobado
+                            ? "border-transparent bg-brand text-brand-fg hover:brightness-105"
+                            : "border-[var(--ok)] text-[var(--ok)] hover:bg-[var(--ok-bg)]"
+                      }`}
+                    >
+                      {busyId === a.id ? "…" : nextLabel(a)}
+                    </button>
+                    <button
+                      onClick={() => remove(a)}
+                      title="Eliminar"
+                      className="rounded-md border border-[var(--border-card)] px-2 py-1.5 text-[11px] text-muted hover:border-[var(--danger)] hover:text-[var(--danger)]"
+                    >
+                      ✕
+                    </button>
                   </div>
-                ) : a.tipo === "foto" ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={a.file_url} alt="asset" className="aspect-square w-full object-cover" />
-                ) : (
-                  <video src={a.file_url} className="aspect-square w-full object-cover" />
-                )}
-                <div className="flex items-center justify-between gap-1 p-1.5 text-[10px]">
-                  <button
-                    onClick={() => toggle(a, "aprobado")}
-                    disabled={a.estado !== "listo"}
-                    className={a.aprobado ? "text-[var(--ok)]" : "text-muted hover:text-foreground disabled:opacity-40"}
-                  >
-                    {a.aprobado ? "✓ aprob." : "aprobar"}
-                  </button>
-                  <button
-                    onClick={() => toggle(a, "publicado")}
-                    disabled={!a.aprobado}
-                    className={a.publicado ? "text-brand" : "text-muted hover:text-foreground disabled:opacity-40"}
-                  >
-                    {a.publicado ? "● público" : "publicar"}
-                  </button>
-                  <button onClick={() => remove(a)} className="text-muted hover:text-[var(--danger)]">✕</button>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

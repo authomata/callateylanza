@@ -143,10 +143,18 @@ export default async function PortalPage() {
       )}
 
       {/* galería */}
-      {(fotos.length > 0 || videos.length > 0) && (
-        <section className="space-y-3">
-          <h2 className="font-serif text-xl">Galería</h2>
-          {fotos.length > 0 && (
+      <section className="space-y-3">
+        <h2 className="font-serif text-xl">Galería</h2>
+        {fotos.length === 0 && videos.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-[var(--border-card)] p-6 text-center">
+            <p className="text-sm text-secondary">Tu sesión de fotos está en producción.</p>
+            <p className="mt-1 text-xs text-muted">
+              Aquí van a aparecer tus fotos y videos para ver y descargar.
+            </p>
+          </div>
+        ) : (
+          <>
+            {fotos.length > 0 && (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {fotos.map((f) => (
                 <a key={f.id} href={f.file_url} target="_blank" className="group relative overflow-hidden rounded-xl border border-[var(--border-card)]">
@@ -156,15 +164,16 @@ export default async function PortalPage() {
               ))}
             </div>
           )}
-          {videos.length > 0 && (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {videos.map((v) => (
-                <video key={v.id} src={v.file_url} controls className="w-full rounded-xl border border-[var(--border-card)]" />
-              ))}
-            </div>
-          )}
-        </section>
-      )}
+            {videos.length > 0 && (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {videos.map((v) => (
+                  <video key={v.id} src={v.file_url} controls className="w-full rounded-xl border border-[var(--border-card)]" />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </section>
 
       {/* aporta material */}
       <AportesSection projectId={project?.id ?? null} aportes={(aportes ?? []) as never} />
