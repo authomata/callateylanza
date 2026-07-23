@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth/roles";
 import { DocView } from "@/components/doc-view";
+import { DeliverableComments } from "@/components/deliverable-comments";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,13 @@ export default async function EntregablePage({ params }: { params: Promise<{ id:
       <article className="rounded-xl border border-[var(--border-card)] bg-surface px-8 py-8 shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
         <DocView tipo={d.tipo}>{d.contenido_md ?? ""}</DocView>
       </article>
+
+      <DeliverableComments
+        deliverableId={id}
+        viewer="cliente"
+        titulo="Comentarios sobre este documento"
+        nota="Escríbele aquí a Andrés y al equipo. Queda todo en este hilo, junto al documento."
+      />
     </div>
   );
 }

@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge, Button } from "@/components/ui";
 import { DocView } from "@/components/doc-view";
 import { PipelineRail } from "@/components/pipeline-rail";
 import { AssetManager } from "@/components/asset-manager";
+import { DeliverableComments } from "@/components/deliverable-comments";
 import { LandingPanel } from "@/components/landing-panel";
 import { DELIVERABLE_ESTADO } from "@/lib/estados";
 import { autoCorrectVoseo } from "@/lib/validators/voseo";
@@ -20,8 +21,6 @@ import {
   restoreVersion,
   overrideUnlock,
   rechazar,
-  addComment,
-  getComments,
   publicar,
 } from "../actions";
 import InsumosPanel from "./insumos";
@@ -403,7 +402,15 @@ export default function ProjectWorkspace({ projectId, userRol, deliverables, inp
 
             {selected.tipo === "D5" && <LandingPanel projectId={projectId} />}
 
-            <CommentsThread deliverableId={selId} />
+            <DeliverableComments
+              deliverableId={selId}
+              viewer="equipo"
+              nota={
+                selected.estado === "publicado"
+                  ? "El cliente ve este hilo en su portal y puede responder."
+                  : "Interno por ahora: el cliente lo verá cuando publiques el entregable."
+              }
+            />
           </>
         )}
       </section>
@@ -557,68 +564,6 @@ function Checklist({ items }: { items: string[] }) {
         ))}
       </ul>
     </details>
-  );
-}
-
-type Cmt = { id: string; texto: string; created_at: string; users: { nombre: string } | null };
-
-function CommentsThread({ deliverableId }: { deliverableId: string }) {
-  const [comments, setComments] = useState<Cmt[]>([]);
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    getComments(deliverableId).then((c) => {
-      if (active) setComments(c as unknown as Cmt[]);
-    });
-    return () => {
-      active = false;
-    };
-  }, [deliverableId]);
-
-  async function send() {
-    if (!text.trim() || sending) return;
-    setSending(true);
-    try {
-      await addComment(deliverableId, text);
-      setText("");
-      setComments((await getComments(deliverableId)) as unknown as Cmt[]);
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <div className="rounded-xl border border-[var(--border-card)] bg-surface p-3">
-      <div className="mb-2 font-mono text-[10px] uppercase tracking-wider text-muted">
-        Comentarios ({comments.length})
-      </div>
-      {comments.length > 0 && (
-        <ul className="mb-2 space-y-2">
-          {comments.map((c) => (
-            <li key={c.id} className="border-l-2 border-[var(--border)] pl-2 text-sm">
-              <span className="text-secondary">{c.texto}</span>
-              <span className="mt-0.5 block text-[10px] text-muted">
-                {c.users?.nombre ?? "—"} · {new Date(c.created_at).toLocaleString("es-CL")}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="flex gap-2">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder="Agregar un comentario…"
-          className="flex-1 rounded-lg border border-[var(--border-card)] bg-background px-2.5 py-1.5 text-sm outline-none focus:border-brand"
-        />
-        <Button variant="secondary" onClick={send} disabled={sending || !text.trim()}>
-          {sending ? "…" : "Enviar"}
-        </Button>
-      </div>
-    </div>
   );
 }
 

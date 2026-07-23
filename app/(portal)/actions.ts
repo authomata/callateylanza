@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUser } from "@/lib/auth/roles";
-import { notifyRole, appOrigin } from "@/lib/email";
+import { notifyRole, notifyEmail, appOrigin } from "@/lib/email";
 
 // El usuario actualiza su propio nombre. Usa service role tras verificar identidad,
 // para no abrir una policy de UPDATE amplia sobre users/clients.
@@ -67,6 +67,80 @@ export async function addAporte(
 
   revalidatePath("/portal");
   revalidatePath(`/projects/${projectId}`);
+}
+
+// ── Comentarios de un entregable (ida y vuelta cliente ↔ equipo) ─────────────
+export async function getComentarios(deliverableId: string) {
+  const user = await getCurrentUser();
+  if (!user) return [];
+  const supabase = await createClient(); // RLS filtra: staff todo, cliente solo lo suyo publicado
+  const { data } = await supabase
+    .from("comments")
+    .select("id, texto, created_at, users(nombre, rol)")
+    .eq("deliverable_id", deliverableId)
+    .order("created_at");
+  return data ?? [];
+}
+
+// El cliente (o el equipo) comenta el entregable. Avisa a la otra parte.
+export async function comentar(deliverableId: string, texto: string) {
+  const user = await getCurrentUser();
+  if (!user) throw new Error("No autorizado");
+  const t = texto.trim();
+  if (!t) throw new Error("Escribe un comentario");
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("comments")
+    .insert({ deliverable_id: deliverableId, user_id: user.id, texto: t });
+  if (error) throw new Error(error.message);
+
+  // contexto para el aviso
+  const admin = createAdminClient();
+  const { data: d } = await admin
+    .from("deliverables")
+    .select("tipo, titulo, project_id")
+    .eq("id", deliverableId)
+    .single();
+
+  const origin = await appOrigin();
+  if (user.rol === "cliente" && d) {
+    // el cliente comentó → avisar al equipo (campanita + email)
+    const resumen = `${user.nombre} comentó ${d.tipo} — ${d.titulo}`;
+    await admin.from("notifications").insert([
+      { target_rol: "admin", project_id: d.project_id, deliverable_id: deliverableId, tipo: "comentario", texto: resumen },
+      { target_rol: "operador", project_id: d.project_id, deliverable_id: deliverableId, tipo: "comentario", texto: resumen },
+    ]);
+    const shell = {
+      titulo: resumen,
+      cuerpo: `<p style="border-left:3px solid #bc5b34;padding-left:12px;color:#1a1712">${t}</p>`,
+      ctaUrl: `${origin}/projects/${d.project_id}`,
+      ctaText: "Abrir el entregable",
+    };
+    await notifyRole("admin", resumen, shell);
+    await notifyRole("operador", resumen, shell);
+  } else if (d) {
+    // el equipo comentó → avisar al cliente por correo
+    const { data: proj } = await admin
+      .from("projects")
+      .select("clients(nombre, email, user_id)")
+      .eq("id", d.project_id)
+      .single();
+    const cli = (proj as unknown as { clients: { nombre: string; email: string | null; user_id: string | null } | null })?.clients;
+    if (cli?.email && cli.user_id) {
+      await notifyEmail(cli.email, `Comentario en ${d.titulo}`, {
+        titulo: `${cli.nombre.split(" ")[0]}, tienes un comentario`,
+        cuerpo:
+          `<p>Sobre <strong>${d.titulo}</strong>:</p>` +
+          `<p style="border-left:3px solid #bc5b34;padding-left:12px;color:#1a1712">${t}</p>`,
+        ctaUrl: `${origin}/portal/entregable/${deliverableId}`,
+        ctaText: "Ver y responder",
+      });
+    }
+  }
+
+  revalidatePath(`/portal/entregable/${deliverableId}`);
+  if (d) revalidatePath(`/projects/${d.project_id}`);
 }
 
 // El cliente envía un mensaje al equipo → queda con fecha/hora + avisa a admin y operador.
